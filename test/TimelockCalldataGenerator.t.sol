@@ -1,0 +1,955 @@
+// SPDX-FileCopyrightText: © 2026 Dai Foundation <www.daifoundation.org>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+pragma solidity ^0.8.24;
+
+import "pas/dss-test/DssTest.sol";
+import { MCD, DssInstance } from "pas/dss-test/MCD.sol";
+import {
+    TimelockCalldataGenerator,
+    RateLimitConfig
+} from "src/TimelockCalldataGenerator.sol";
+import { Timelock } from "pas/timelock/Timelock.sol";
+import { BeamState } from "pas/BeamState.sol";
+import { Configurator } from "pas/Configurator.sol";
+import { PASDeploy } from "pas/deploy/PASDeploy.sol";
+import { PASInit } from "pas/deploy/PASInit.sol";
+import { PASInstance } from "pas/deploy/PASInstance.sol";
+
+import { Beacon }     from "diamond-pau/Beacon.sol";
+import { PAUFactory } from "diamond-pau/PAUFactory.sol";
+
+import { IAccessControls }         from "diamond-pau/interfaces/IAccessControls.sol";
+import { IController }             from "diamond-pau/interfaces/IController.sol";
+import { IEnumerableIntegrations } from "diamond-pau/interfaces/IEnumerableIntegrations.sol";
+
+import { AaveFacet }       from "diamond-pau/facets/aave/AaveFacet.sol";
+import { CCTPFacet }       from "diamond-pau/facets/cctp/CCTPFacet.sol";
+import { CentrifugeFacet } from "diamond-pau/facets/centrifuge/CentrifugeFacet.sol";
+import { CurveFacet }      from "diamond-pau/facets/curve/CurveFacet.sol";
+import { ERC4626Facet }    from "diamond-pau/facets/erc4626/ERC4626Facet.sol";
+import { LayerZeroFacet }  from "diamond-pau/facets/layer-zero/LayerZeroFacet.sol";
+import { NFATHaloFacet }   from "diamond-pau/facets/nfat-halo/NFATHaloFacet.sol";
+import { OTCFacet }        from "diamond-pau/facets/otc/OTCFacet.sol";
+import { UniswapV3Facet }  from "diamond-pau/facets/uniswap-v3/UniswapV3Facet.sol";
+import { UniswapV4Facet }  from "diamond-pau/facets/uniswap-v4/UniswapV4Facet.sol";
+import { USDSFacet }       from "diamond-pau/facets/usds/USDSFacet.sol";
+
+import { IAaveFacet }       from "diamond-pau/facets/aave/IAaveFacet.sol";
+import { ICCTPFacet }       from "diamond-pau/facets/cctp/ICCTPFacet.sol";
+import { ICentrifugeFacet } from "diamond-pau/facets/centrifuge/ICentrifugeFacet.sol";
+import { ICurveFacet }      from "diamond-pau/facets/curve/ICurveFacet.sol";
+import { IERC4626Facet }    from "diamond-pau/facets/erc4626/IERC4626Facet.sol";
+import { ILayerZeroFacet }  from "diamond-pau/facets/layer-zero/ILayerZeroFacet.sol";
+import { INFATHaloFacet }   from "diamond-pau/facets/nfat-halo/INFATHaloFacet.sol";
+import { IOTCFacet }        from "diamond-pau/facets/otc/IOTCFacet.sol";
+import { IUniswapV3Facet }  from "diamond-pau/facets/uniswap-v3/IUniswapV3Facet.sol";
+import { IUniswapV4Facet }  from "diamond-pau/facets/uniswap-v4/IUniswapV4Facet.sol";
+import { IUSDSFacet }       from "diamond-pau/facets/usds/IUSDSFacet.sol";
+
+import { IMainnetControllerFull } from "diamond-pau-test/interfaces/IMainnetControllerFull.sol";
+
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+interface ControllerLike {
+    function rateLimits() external view returns (address);
+}
+
+interface RateLimitsLike {
+    function grantRole(bytes32 role, address account) external;
+    function getRateLimitData(bytes32 key) external view returns (uint256, uint256, uint256, uint256);
+}
+
+contract TimelockCalldataGeneratorTest is DssTest {
+    // --- Mainnet Addresses (used only for real rate-limiter integration) ---
+    // Rate limiter addresses are fetched from the Spark / Grove controllers on mainnet.
+    address constant SPARK_CONTROLLER = 0xc9ff605003A1b389980f650e1aEFA1ef25C8eE32;
+    address constant SPARK_PROXY      = 0x3300f198988e4C9C63F75dF86De36421f06af8c4;
+    address constant GROVE_CONTROLLER = 0xfd9dEA9a8D5B955649579Af482DB7198A392A9F5;
+    address constant GROVE_PROXY      = 0x1369f7b2b38c76B6478c0f0E66D94923421891Ba;
+    address constant CHAINLOG         = 0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F;
+
+    bytes32 constant PREDECESSOR = keccak256("PREDECESSOR");
+    uint256 constant MIN_DELAY = 1 days;
+
+    bytes32 constant OZ_DEFAULT_ADMIN_ROLE = bytes32(0);
+
+    DssInstance dss;
+
+    // --- Fetched from controllers ---
+    address SPARK_RATE_LIMITS;
+    address GROVE_RATE_LIMITS;
+
+    // --- PAS Instance ---
+    BeamState                 beamState;
+    Configurator              configurator;
+    Timelock                  timelock;
+    TimelockCalldataGenerator generator;
+
+    // --- Diamond-pau ---
+    Beacon beacon;
+    PAUFactory factory;
+    IMainnetControllerFull controller;   // diamond proxy
+
+    address pauseProxy;
+    address coreCouncil;
+    address cBeam;
+
+    function setUp() public {
+        vm.createSelectFork(vm.envString("ETH_RPC_URL"));
+
+        // Load DssInstance from chainlog
+        dss = MCD.loadFromChainlog(CHAINLOG);
+
+        // Fetch rate limits addresses from real actual controllers (kept for end-to-end rate-limit checks)
+        SPARK_RATE_LIMITS = ControllerLike(SPARK_CONTROLLER).rateLimits();
+        GROVE_RATE_LIMITS = ControllerLike(GROVE_CONTROLLER).rateLimits();
+
+        coreCouncil = makeAddr("coreCouncil");
+        cBeam       = makeAddr("cBeam");
+
+        pauseProxy = dss.chainlog.getAddress("MCD_PAUSE_PROXY");
+
+        PASInstance memory pas = PASDeploy.deploy(address(this), pauseProxy, MIN_DELAY);
+        beamState    = BeamState(pas.beamState);
+        configurator = Configurator(pas.configurator);
+        timelock     = Timelock(payable(pas.timelock));
+        generator    = new TimelockCalldataGenerator(pas.timelock, pas.beamState);
+
+        // Deploy diamond-pau with the Configurator as controller admin
+        // so that `configurator.callControllerAction` (which forwards as msg.sender = configurator)
+        // satisfies the facets' `onlyRole(DEFAULT_ADMIN_ROLE)` checks.
+        _deployDiamondPau(address(configurator));
+
+        vm.startPrank(pauseProxy);
+        PASInit.init(pas, MIN_DELAY, coreCouncil, new address[](0), new address[](0));
+        vm.stopPrank();
+
+        // Grant configurator admin role on mainnet rate limiters (real downstream contracts)
+        vm.prank(SPARK_PROXY);
+        RateLimitsLike(SPARK_RATE_LIMITS).grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
+
+        vm.prank(GROVE_PROXY);
+        RateLimitsLike(GROVE_RATE_LIMITS).grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
+
+        // Onboard diamond controller, rate limiters, and cBeam in BeamState via generator+timelock
+        bytes32 id;
+        id = _scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"),     MIN_DELAY));
+        _execute(id);
+        id = _scheduleWithGeneratorData(generator.addRateLimits(SPARK_RATE_LIMITS,   bytes32(0), keccak256("spark-rl"), MIN_DELAY));
+        _execute(id);
+        id = _scheduleWithGeneratorData(generator.addRateLimits(GROVE_RATE_LIMITS,   bytes32(0), keccak256("grove-rl"), MIN_DELAY));
+        _execute(id);
+        id = _scheduleWithGeneratorData(generator.addCBeam(cBeam,                    bytes32(0), keccak256("cbeam"),    MIN_DELAY));
+        _execute(id);
+
+        // Verify generator-driven calls correctly configured BeamState
+        assertEq(beamState.controllers(address(controller)), 1, "diamond controller not added");
+        assertEq(beamState.rateLimits(SPARK_RATE_LIMITS),    1, "Spark rate limits not added");
+        assertEq(beamState.rateLimits(GROVE_RATE_LIMITS),    1, "Grove rate limits not added");
+        assertEq(beamState.cBeams(cBeam),                    1, "cBeam not added");
+
+        // Link cBeam to controllers / rate limiters
+        vm.startPrank(coreCouncil);
+        beamState.setCBeamForController(address(controller), cBeam);
+        beamState.setCBeamForRateLimits(SPARK_RATE_LIMITS,   cBeam);
+        beamState.setCBeamForRateLimits(GROVE_RATE_LIMITS,   cBeam);
+        vm.stopPrank();
+
+        // Set hop for rate limiters (required for setRateLimit to work on increases)
+        bytes32 hopId;
+        hopId = _scheduleWithGeneratorData(generator.setHop(SPARK_RATE_LIMITS, 1 hours, bytes32(0), keccak256("spark-hop"), MIN_DELAY));
+        _execute(hopId);
+        hopId = _scheduleWithGeneratorData(generator.setHop(GROVE_RATE_LIMITS, 1 hours, bytes32(0), keccak256("grove-hop"), MIN_DELAY));
+        _execute(hopId);
+
+        // Mark the shared predecessor as executed so every test's operations (which declare it as
+        // their predecessor) can be executed.
+        bytes32 slot = keccak256(abi.encode(PREDECESSOR, uint256(1))); // _timestamps is at slot 1
+        vm.store(address(timelock), slot, bytes32(uint256(1))); // Executed == 1
+        assertTrue(timelock.isOperationDone(PREDECESSOR));
+    }
+
+    // ============================================================================
+    // Diamond-pau deployment / wiring
+    // ============================================================================
+
+    function _deployDiamondPau(address admin) internal {
+        beacon  = new Beacon(address(this));
+        factory = new PAUFactory(address(beacon));
+
+        // Wire the subset of facets the generator targets.
+        bytes32[] memory ids = new bytes32[](11);
+        ids[0]  = _wireAaveFacet();
+        ids[1]  = _wireCCTPFacet();
+        ids[2]  = _wireCentrifugeFacet();
+        ids[3]  = _wireCurveFacet();
+        ids[4]  = _wireERC4626Facet();
+        ids[5]  = _wireLayerZeroFacet();
+        ids[6]  = _wireNFATHaloFacet();
+        ids[7]  = _wireOTCFacet();
+        ids[8]  = _wireUniswapV3Facet();
+        ids[9]  = _wireUniswapV4Facet();
+        ids[10] = _wireUSDSFacet();
+
+        // The factory deploys each component separately; `admin` receives DEFAULT_ADMIN_ROLE on
+        // the AccessControls, which gates both `updateIntegrations` and every facet's admin setter.
+        // (The generator only exercises admin config actions, so the CONTROLLER role grants on the
+        // proxy / rate limiter that operational calls would need are intentionally omitted here.)
+        address accessControls = factory.deployAccessControls(admin);
+        address almProxy       = factory.deployALMProxy(admin);
+        address rateLimits     = factory.deployRateLimits(admin);
+
+        controller = IMainnetControllerFull(payable(
+            factory.deployController(accessControls, almProxy, rateLimits)
+        ));
+
+        // admin pulls the beacon's integration table into the controller's dispatch table.
+        vm.prank(admin);
+        IController(payable(address(controller))).updateIntegrations(ids);
+    }
+
+    function _wireAaveFacet() internal returns (bytes32 id) {
+        address facet = address(new AaveFacet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.aave_setMaxSlippage.selector, IAaveFacet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.aave_getMaxSlippage.selector, IAaveFacet.getMaxSlippage.selector);
+
+        id = "AAVE_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireCCTPFacet() internal returns (bytes32 id) {
+        address facet = address(new CCTPFacet(makeAddr("CCTP_TOKEN_MESSENGER"), makeAddr("USDC")));
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.cctp_setDomainParameters.selector, ICCTPFacet.setDomainParameters.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.cctp_getDomainParameters.selector, ICCTPFacet.getDomainParameters.selector);
+
+        id = "CCTP_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireCentrifugeFacet() internal returns (bytes32 id) {
+        address facet = address(new CentrifugeFacet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.centrifuge_setRecipient.selector, ICentrifugeFacet.setRecipient.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.centrifuge_getRecipient.selector, ICentrifugeFacet.getRecipient.selector);
+
+        id = "CENTRIFUGE_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireCurveFacet() internal returns (bytes32 id) {
+        address facet = address(new CurveFacet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.curve_setMaxSlippage.selector, ICurveFacet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.curve_getMaxSlippage.selector, ICurveFacet.getMaxSlippage.selector);
+
+        id = "CURVE_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireERC4626Facet() internal returns (bytes32 id) {
+        address facet = address(new ERC4626Facet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.erc4626_setMaxExchangeRate.selector, IERC4626Facet.setMaxExchangeRate.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.erc4626_getMaxExchangeRate.selector, IERC4626Facet.getMaxExchangeRate.selector);
+
+        id = "ERC4626_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireLayerZeroFacet() internal returns (bytes32 id) {
+        address facet = address(new LayerZeroFacet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.layerZero_setRecipient.selector, ILayerZeroFacet.setRecipient.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.layerZero_getRecipient.selector, ILayerZeroFacet.getRecipient.selector);
+
+        id = "LAYER_ZERO_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireNFATHaloFacet() internal returns (bytes32 id) {
+        address facet = address(new NFATHaloFacet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.nfatHalo_setMaxAnnualGrowthRate.selector, INFATHaloFacet.setMaxAnnualGrowthRate.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.nfatHalo_getMaxAnnualGrowthRate.selector, INFATHaloFacet.getMaxAnnualGrowthRate.selector);
+
+        id = "NFAT_HALO_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireOTCFacet() internal returns (bytes32 id) {
+        address facet = address(new OTCFacet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](6);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setMaxSlippage.selector,  IOTCFacet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setBuffer.selector,       IOTCFacet.setBuffer.selector);
+        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setRechargeRate.selector, IOTCFacet.setRechargeRate.selector);
+        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getMaxSlippage.selector,  IOTCFacet.getMaxSlippage.selector);
+        wires[4] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getBuffer.selector,       IOTCFacet.getBuffer.selector);
+        wires[5] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getRechargeRate.selector, IOTCFacet.getRechargeRate.selector);
+
+        id = "OTC_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireUniswapV3Facet() internal returns (bytes32 id) {
+        address facet = address(new UniswapV3Facet(makeAddr("UNISWAP_V3_POSITION_MGR"), makeAddr("UNISWAP_V3_ROUTER")));
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](9);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setMaxSlippage.selector,             IUniswapV3Facet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setMaxTickDelta.selector,            IUniswapV3Facet.setMaxTickDelta.selector);
+        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setLiquidityLowerTickBound.selector, IUniswapV3Facet.setLiquidityLowerTickBound.selector);
+        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setLiquidityUpperTickBound.selector, IUniswapV3Facet.setLiquidityUpperTickBound.selector);
+        wires[4] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setTWAPSecondsAgo.selector,          IUniswapV3Facet.setTWAPSecondsAgo.selector);
+        wires[5] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getMaxSlippage.selector,             IUniswapV3Facet.getMaxSlippage.selector);
+        wires[6] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getMaxTickDelta.selector,            IUniswapV3Facet.getMaxTickDelta.selector);
+        wires[7] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getLiquidityTickBounds.selector,     IUniswapV3Facet.getLiquidityTickBounds.selector);
+        wires[8] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getTWAPSecondsAgo.selector,          IUniswapV3Facet.getTWAPSecondsAgo.selector);
+
+        id = "UNISWAP_V3_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireUniswapV4Facet() internal returns (bytes32 id) {
+        address facet = address(new UniswapV4Facet(makeAddr("PERMIT2"), makeAddr("UNISWAP_V4_POSITION_MGR"), makeAddr("UNISWAP_V4_ROUTER")));
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](4);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_setMaxSlippage.selector, IUniswapV4Facet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_setTickLimits.selector,  IUniswapV4Facet.setTickLimits.selector);
+        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_getMaxSlippage.selector,   IUniswapV4Facet.getMaxSlippage.selector);
+        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_getTickLimits.selector,     IUniswapV4Facet.getTickLimits.selector);
+
+        id = "UNISWAP_V4_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function _wireUSDSFacet() internal returns (bytes32 id) {
+        address facet = address(new USDSFacet(makeAddr("USDS")));
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.usds_setVault.selector, IUSDSFacet.setVault.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.usds_vault.selector,    IUSDSFacet.vault.selector);
+
+        id = "USDS_FACET";
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    // ============================================================================
+    // Helpers
+    // ============================================================================
+
+    // Submits the generator-built calldata to the Timelock as coreCouncil (the proposer)
+    // via a low-level call, and returns the id of the just-scheduled operation.
+    function _scheduleWithGeneratorData(bytes memory data) internal returns (bytes32 id) {
+        vm.prank(coreCouncil);
+        (bool success, bytes memory ret) = address(timelock).call(data);
+        if (!success) {
+            if (ret.length > 0) {
+                assembly { revert(add(32, ret), mload(ret)) }
+            }
+            revert("TimelockCalldataGenerator/schedule-call-failed");
+        }
+        id = timelock.getLastOperationId();
+    }
+
+    function _execute(bytes32 id) internal {
+        vm.warp(block.timestamp + MIN_DELAY);
+        Timelock.Operation memory op = timelock.getOperation(id);
+        timelock.executeBatch(op.targets, op.values, op.payloads, op.predecessor, op.salt);
+    }
+
+    function _getControllerAction(bytes32 id) internal view returns (bytes memory data, address controller_) {
+        Timelock.Operation memory op = timelock.getOperation(id);
+        // Decode payload: selector (4 bytes) || abi.encode(data, controller)
+        bytes memory payload = op.payloads[0];
+        assembly {
+            payload := add(payload, 4)
+        }
+        (data, controller_) = abi.decode(payload, (bytes, address));
+    }
+
+    function _expectedOperationId(bytes memory payload, bytes32 predecessor, bytes32 salt) internal view returns (bytes32) {
+        address[] memory targets = new address[](1);
+        targets[0] = address(beamState);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory payloads = new bytes[](1);
+        payloads[0] = payload;
+        return timelock.hashOperationBatch(targets, values, payloads, predecessor, salt);
+    }
+
+    function _expectedControllerActionId(bytes memory controllerData, address controller_, bytes32 predecessor, bytes32 salt) internal view returns (bytes32) {
+        return _expectedOperationId(
+            abi.encodeWithSelector(BeamState.addInitControllerActions.selector, controllerData, controller_),
+            predecessor,
+            salt
+        );
+    }
+
+    // Schedules + executes a generator-built controller action and routes it through the
+    // configurator to the target controller. Returns the extracted controller-action data
+    // for assertions.
+    function _runControllerAction(bytes memory generatorOutput, bytes memory expectedControllerData, address target, bytes32 salt) internal returns (bytes memory data) {
+        bytes32 expectedId = _expectedControllerActionId(expectedControllerData, target, PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generatorOutput);
+        assertEq(id, expectedId, "operation id mismatch");
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+
+        address ctrlAddr;
+        (data, ctrlAddr) = _getControllerAction(id);
+        assertEq(ctrlAddr, target, "controller mismatch");
+        assertEq(data, expectedControllerData, "controller data mismatch");
+
+        _execute(id);
+
+        vm.prank(cBeam);
+        configurator.callControllerAction(target, data);
+    }
+
+    // ============================================================================
+    // Constructor Test
+    // ============================================================================
+
+    function testConstructor() public {
+        TimelockCalldataGenerator newGen = new TimelockCalldataGenerator(address(timelock), address(beamState));
+
+        assertEq(address(newGen.timelock()),  address(timelock),  "Timelock set correctly");
+        assertEq(address(newGen.beamState()), address(beamState), "BeamState set correctly");
+    }
+
+    // ============================================================================
+    // BeamState Configuration Tests
+    // ============================================================================
+
+    function testStart() public {
+        vm.prank(coreCouncil);
+        beamState.stop();
+        assertTrue(beamState.stopped());
+
+        bytes32 salt = keccak256("start");
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.start.selector), PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.start(PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        _execute(id);
+        assertFalse(beamState.stopped());
+    }
+
+    function testSetHop() public {
+        bytes32 salt = keccak256("hop");
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setHop.selector, SPARK_RATE_LIMITS, 3600), PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.setHop(SPARK_RATE_LIMITS, 3600, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        _execute(id);
+        assertEq(beamState.getHop(SPARK_RATE_LIMITS), 3600);
+    }
+
+    function testSetMaxChange() public {
+        bytes32 salt = keccak256("mc");
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setMaxChange.selector, GROVE_RATE_LIMITS, 2e18), PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.setMaxChange(GROVE_RATE_LIMITS, 2e18, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        _execute(id);
+        assertEq(beamState.maxChange(GROVE_RATE_LIMITS), 2e18);
+    }
+
+    function testAddRateLimits() public {
+        address rateLimits = makeAddr("rateLimits");
+        bytes32 salt = keccak256("rl");
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addRateLimits.selector, rateLimits), PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.addRateLimits(rateLimits, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        _execute(id);
+        assertEq(beamState.rateLimits(rateLimits), 1);
+    }
+
+    function testAddController() public {
+        address newController = makeAddr("controller");
+        bytes32 salt = keccak256("ctrl");
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addController.selector, newController), PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.addController(newController, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        _execute(id);
+        assertEq(beamState.controllers(newController), 1);
+    }
+
+    function testAddCBeam() public {
+        address beam = makeAddr("beam");
+        bytes32 salt = keccak256("cbeam");
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addCBeam.selector, beam), PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.addCBeam(beam, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        _execute(id);
+        assertEq(beamState.cBeams(beam), 1);
+    }
+
+    function _checkAddInitRateLimits(address rateLimits, bytes32 key, bytes32 salt) internal {
+        RateLimitConfig memory config = RateLimitConfig({
+            key: key,
+            rateLimits: rateLimits,
+            maxAmount: 10_000_000e18,
+            slope: 1_000_000e18
+        });
+
+        bytes32 expectedId = _expectedOperationId(
+            abi.encodeWithSelector(BeamState.addInitRateLimits.selector, config.key, config.rateLimits, config.maxAmount, config.slope),
+            PREDECESSOR,
+            salt
+        );
+
+        bytes32 id = _scheduleWithGeneratorData(generator.addInitRateLimits(config, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        _execute(id);
+
+        // Verify stored in BeamState
+        BeamState.DefaultRateLimits memory limits = beamState.getInitRateLimits(config.key, rateLimits);
+        assertEq(limits.maxAmount, config.maxAmount);
+        assertEq(limits.slope, config.slope);
+
+        // Execute on real rate limiter via Configurator
+        vm.prank(cBeam);
+        configurator.setRateLimit(rateLimits, config.key, config.maxAmount, config.slope);
+
+        // Verify set on real rate limiter
+        (uint256 setMax, uint256 setSlope,,) = RateLimitsLike(rateLimits).getRateLimitData(config.key);
+        assertEq(setMax, config.maxAmount);
+        assertEq(setSlope, config.slope);
+    }
+
+    function testAddInitRateLimitsOnSpark() public {
+        _checkAddInitRateLimits(SPARK_RATE_LIMITS, keccak256("spark-deposit"), keccak256("initS"));
+    }
+
+    function testAddInitRateLimitsOnGrove() public {
+        _checkAddInitRateLimits(GROVE_RATE_LIMITS, keccak256("grove-deposit"), keccak256("initG"));
+    }
+
+    function _checkBatchAddInitRateLimits(address rateLimits, bytes32 key1, bytes32 key2, bytes32 salt) internal {
+        RateLimitConfig[] memory configs = new RateLimitConfig[](2);
+        configs[0] = RateLimitConfig(key1, rateLimits, 5_000_000e18, 500_000e18);
+        configs[1] = RateLimitConfig(key2, rateLimits, 3_000_000e18, 300_000e18);
+
+        // Pre-compute expected operationId for batch
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory payloads = new bytes[](2);
+        for (uint256 i = 0; i < 2; i++) {
+            targets[i] = address(beamState);
+            payloads[i] = abi.encodeWithSelector(BeamState.addInitRateLimits.selector, configs[i].key, configs[i].rateLimits, configs[i].maxAmount, configs[i].slope);
+        }
+        bytes32 expectedId = timelock.hashOperationBatch(targets, values, payloads, PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.batchAddInitRateLimits(configs, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+        assertEq(timelock.getOperationsCount(), 1);
+
+        vm.warp(block.timestamp + MIN_DELAY);
+        timelock.executeBatch(targets, values, payloads, PREDECESSOR, salt);
+
+        // Verify stored in BeamState
+        assertEq(beamState.getInitRateLimits(configs[0].key, rateLimits).maxAmount, configs[0].maxAmount);
+        assertEq(beamState.getInitRateLimits(configs[1].key, rateLimits).maxAmount, configs[1].maxAmount);
+
+        // Execute on real rate limiter via Configurator
+        vm.startPrank(cBeam);
+        configurator.setRateLimit(rateLimits, configs[0].key, configs[0].maxAmount, configs[0].slope);
+        configurator.setRateLimit(rateLimits, configs[1].key, configs[1].maxAmount, configs[1].slope);
+        vm.stopPrank();
+
+        // Verify set on real rate limiter
+        (uint256 max0, uint256 slope0,,) = RateLimitsLike(rateLimits).getRateLimitData(configs[0].key);
+        assertEq(max0, configs[0].maxAmount);
+        assertEq(slope0, configs[0].slope);
+
+        (uint256 max1, uint256 slope1,,) = RateLimitsLike(rateLimits).getRateLimitData(configs[1].key);
+        assertEq(max1, configs[1].maxAmount);
+        assertEq(slope1, configs[1].slope);
+    }
+
+    function testBatchAddInitRateLimitsOnSpark() public {
+        _checkBatchAddInitRateLimits(SPARK_RATE_LIMITS, keccak256("spark-batch-1"), keccak256("spark-batch-2"), keccak256("batchS"));
+    }
+
+    function testBatchAddInitRateLimitsOnGrove() public {
+        _checkBatchAddInitRateLimits(GROVE_RATE_LIMITS, keccak256("grove-batch-1"), keccak256("grove-batch-2"), keccak256("batchG"));
+    }
+
+    // ============================================================================
+    // Controller Action Tests (real diamond-pau facets)
+    // ============================================================================
+
+    // --- AaveFacet ---
+
+    function testAave_setMaxSlippage() public {
+        address aToken = makeAddr("aToken");
+        uint256 slippage = 250;
+        bytes32 salt = keccak256("aave-slip");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.aave_setMaxSlippage, (aToken, slippage));
+        _runControllerAction(
+            generator.aave_setMaxSlippage(aToken, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.aave_getMaxSlippage(aToken), slippage);
+    }
+
+    // --- CCTPFacet ---
+
+    function testCctp_setDomainParameters() public {
+        uint32 domain = 6;
+        bytes32 recipient = bytes32(uint256(uint160(makeAddr("cctp-recipient"))));
+        uint32 minFeeCapRate = 10;
+        uint32 maxFeeCapRate = 100;
+        bytes32 salt = keccak256("cctp-dom");
+
+        bytes memory expected = abi.encodeCall(
+            IMainnetControllerFull.cctp_setDomainParameters,
+            (domain, recipient, minFeeCapRate, maxFeeCapRate)
+        );
+        _runControllerAction(
+            generator.cctp_setDomainParameters(domain, recipient, minFeeCapRate, maxFeeCapRate, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        (bytes32 storedRecipient, uint32 storedMin, uint32 storedMax) = controller.cctp_getDomainParameters(domain);
+        assertEq(storedRecipient, recipient);
+        assertEq(storedMin, minFeeCapRate);
+        assertEq(storedMax, maxFeeCapRate);
+    }
+
+    // --- CentrifugeFacet ---
+
+    function testCentrifuge_setRecipient() public {
+        uint16 centrifugeId = 1;
+        bytes32 recipient = bytes32(uint256(uint160(makeAddr("centrifuge-recipient"))));
+        bytes32 salt = keccak256("cent-recipient");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.centrifuge_setRecipient, (centrifugeId, recipient));
+        _runControllerAction(
+            generator.centrifuge_setRecipient(centrifugeId, recipient, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.centrifuge_getRecipient(centrifugeId), recipient);
+    }
+
+    // --- CurveFacet ---
+
+    function testCurve_setMaxSlippage() public {
+        address pool = makeAddr("curve-pool");
+        uint256 slippage = 150;
+        bytes32 salt = keccak256("curve-slip");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.curve_setMaxSlippage, (pool, slippage));
+        _runControllerAction(
+            generator.curve_setMaxSlippage(pool, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.curve_getMaxSlippage(pool), slippage);
+    }
+
+    // --- ERC4626Facet ---
+
+    function testErc4626_setMaxExchangeRate() public {
+        address token = makeAddr("sDAI");
+        uint256 shares = 1e18;
+        uint256 maxExpectedAssets = 1.1e18;
+        bytes32 salt = keccak256("4626-rate");
+
+        bytes memory expected = abi.encodeCall(
+            IMainnetControllerFull.erc4626_setMaxExchangeRate,
+            (token, shares, maxExpectedAssets)
+        );
+        _runControllerAction(
+            generator.erc4626_setMaxExchangeRate(token, shares, maxExpectedAssets, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        // ERC4626Facet stores the rate as (assets * 1e36) / shares, not the (shares, assets) pair.
+        uint256 expectedRate = (1e36 * maxExpectedAssets) / shares;
+        assertEq(controller.erc4626_getMaxExchangeRate(token), expectedRate);
+    }
+
+    // --- LayerZeroFacet ---
+
+    function testLayerZero_setRecipient() public {
+        uint32 endpointId = 111;
+        bytes32 recipient = bytes32(uint256(uint160(makeAddr("lz-recipient"))));
+        bytes32 salt = keccak256("lz-recipient");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.layerZero_setRecipient, (endpointId, recipient));
+        _runControllerAction(
+            generator.layerZero_setRecipient(endpointId, recipient, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.layerZero_getRecipient(endpointId), recipient);
+    }
+
+    // --- NFATHaloFacet ---
+
+    function testNfatHalo_setMaxAnnualGrowthRate() public {
+        address facility = makeAddr("nfat-facility");
+        uint256 maxAnnualGrowthRate = 0.1e18;
+        bytes32 salt = keccak256("nfat-growth");
+
+        bytes memory expected = abi.encodeCall(
+            IMainnetControllerFull.nfatHalo_setMaxAnnualGrowthRate,
+            (facility, maxAnnualGrowthRate)
+        );
+        _runControllerAction(
+            generator.nfatHalo_setMaxAnnualGrowthRate(facility, maxAnnualGrowthRate, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.nfatHalo_getMaxAnnualGrowthRate(facility), maxAnnualGrowthRate);
+    }
+
+    // --- OTCFacet ---
+
+    function testOtc_setMaxSlippage() public {
+        address exchange = makeAddr("otc-exchange");
+        uint256 slippage = 100;
+        bytes32 salt = keccak256("otc-slip");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.otc_setMaxSlippage, (exchange, slippage));
+        _runControllerAction(
+            generator.otc_setMaxSlippage(exchange, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.otc_getMaxSlippage(exchange), slippage);
+    }
+
+    function testOtc_setBuffer() public {
+        address exchange = makeAddr("exchange");
+        address buffer   = makeAddr("buffer");
+        bytes32 salt = keccak256("otc-buf");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.otc_setBuffer, (exchange, buffer));
+        _runControllerAction(
+            generator.otc_setBuffer(exchange, buffer, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.otc_getBuffer(exchange), buffer);
+    }
+
+    function testOtc_setRechargeRate() public {
+        address exchange = makeAddr("exchange-rr");
+        uint256 normalizedRate = 1e18;
+        bytes32 salt = keccak256("otc-rr");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.otc_setRechargeRate, (exchange, normalizedRate));
+        _runControllerAction(
+            generator.otc_setRechargeRate(exchange, normalizedRate, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.otc_getRechargeRate(exchange), normalizedRate);
+    }
+
+    // --- UniswapV3Facet ---
+
+    function testUniswapV3_setMaxSlippage() public {
+        address pool = makeAddr("pool");
+        uint256 slippage = 50;
+        bytes32 salt = keccak256("v3-slip");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setMaxSlippage, (pool, slippage));
+        _runControllerAction(
+            generator.uniswapV3_setMaxSlippage(pool, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.uniswapV3_getMaxSlippage(pool), slippage);
+    }
+
+    function testUniswapV3_setMaxTickDelta() public {
+        address pool = makeAddr("pool");
+        uint24 maxTickDelta = 1000;
+        bytes32 salt = keccak256("v3-tickdelta");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setMaxTickDelta, (pool, maxTickDelta));
+        _runControllerAction(
+            generator.uniswapV3_setMaxTickDelta(pool, maxTickDelta, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.uniswapV3_getMaxTickDelta(pool), maxTickDelta);
+    }
+
+    function testUniswapV3_setLiquidityLowerTickBound() public {
+        address pool = makeAddr("pool");
+        int24 lowerTickBound = -887220;
+        bytes32 salt = keccak256("v3-lower");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setLiquidityLowerTickBound, (pool, lowerTickBound));
+        _runControllerAction(
+            generator.uniswapV3_setLiquidityLowerTickBound(pool, lowerTickBound, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        (int24 storedLower,) = controller.uniswapV3_getLiquidityTickBounds(pool);
+        assertEq(storedLower, lowerTickBound);
+    }
+
+    function testUniswapV3_setLiquidityUpperTickBound() public {
+        address pool = makeAddr("pool");
+        int24 upperTickBound = 887220;
+        bytes32 salt = keccak256("v3-upper");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setLiquidityUpperTickBound, (pool, upperTickBound));
+        _runControllerAction(
+            generator.uniswapV3_setLiquidityUpperTickBound(pool, upperTickBound, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        (, int24 storedUpper) = controller.uniswapV3_getLiquidityTickBounds(pool);
+        assertEq(storedUpper, upperTickBound);
+    }
+
+    function testUniswapV3_setTWAPSecondsAgo() public {
+        address pool = makeAddr("pool");
+        uint32 twapSecondsAgo = 1800;
+        bytes32 salt = keccak256("v3-twap");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setTWAPSecondsAgo, (pool, twapSecondsAgo));
+        _runControllerAction(
+            generator.uniswapV3_setTWAPSecondsAgo(pool, twapSecondsAgo, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.uniswapV3_getTWAPSecondsAgo(pool), twapSecondsAgo);
+    }
+
+    // --- UniswapV4Facet ---
+
+    function testUniswapV4_setMaxSlippage() public {
+        bytes32 poolId = keccak256("v4-pool");
+        uint256 slippage = 75;
+        bytes32 salt = keccak256("v4-slip");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV4_setMaxSlippage, (poolId, slippage));
+        _runControllerAction(
+            generator.uniswapV4_setMaxSlippage(poolId, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.uniswapV4_getMaxSlippage(poolId), slippage);
+    }
+
+    function testUniswapV4_setTickLimits() public {
+        bytes32 poolId = keccak256("v4-tick-pool");
+        int24 tickLowerMin = -887220;
+        int24 tickUpperMax = 887220;
+        uint24 maxTickSpacing = 200;
+        bytes32 salt = keccak256("v4-tick");
+
+        bytes memory expected = abi.encodeCall(
+            IMainnetControllerFull.uniswapV4_setTickLimits,
+            (poolId, tickLowerMin, tickUpperMax, maxTickSpacing)
+        );
+        _runControllerAction(
+            generator.uniswapV4_setTickLimits(poolId, tickLowerMin, tickUpperMax, maxTickSpacing, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        (int24 storedLower, int24 storedUpper, uint24 storedSpacing) = controller.uniswapV4_getTickLimits(poolId);
+        assertEq(storedLower, tickLowerMin);
+        assertEq(storedUpper, tickUpperMax);
+        assertEq(storedSpacing, maxTickSpacing);
+    }
+
+    // --- USDSFacet ---
+
+    function testUsds_setVault() public {
+        address vault = makeAddr("usds-vault");
+        bytes32 salt = keccak256("usds-vault");
+
+        bytes memory expected = abi.encodeCall(IMainnetControllerFull.usds_setVault, (vault));
+        _runControllerAction(
+            generator.usds_setVault(vault, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.usds_vault(), vault);
+    }
+}
+
+interface IERC20Like {
+    function allowance(address owner, address spender) external view returns (uint256);
+}
