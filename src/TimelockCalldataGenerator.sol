@@ -25,14 +25,6 @@ interface TimelockLike {
         bytes32 salt,
         uint256 delay
     ) external;
-
-    function hashOperationBatch(
-        address[] calldata targets,
-        uint256[] calldata values,
-        bytes[] calldata payloads,
-        bytes32 predecessor,
-        bytes32 salt
-    ) external view returns (bytes32);
 }
 
 interface BeamStateLike {
@@ -80,18 +72,13 @@ struct RateLimitConfig {
     uint256 slope;
 }
 
-// Notes:
-// - This generator is a helper only and can be bypassed by submitting payloads directly to the Timelock (for an authorised proposer).
-// - The generator is assumed to be frequently replaced/improved, depending on downstream facet changes or other needs.
-// - The actual downstream changes only take effect when cBEAMs use the BeamState configurations, so atomicity in configurations can not be assumed (which is a known issue).
-// - As part of a controller onboarding it might need to be `kiss`ed on the PSM. That is assumed to be orchestrated without the generator.
 contract TimelockCalldataGenerator {
 
     TimelockLike  public immutable timelock;
     BeamStateLike public immutable beamState;
 
     constructor(address timelock_, address beamState_) {
-        timelock  = TimelockLike(payable(timelock_));
+        timelock  = TimelockLike(timelock_);
         beamState = BeamStateLike(beamState_);
     }
 

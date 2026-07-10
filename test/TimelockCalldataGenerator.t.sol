@@ -949,7 +949,3 @@ contract TimelockCalldataGeneratorTest is DssTest {
         assertEq(controller.usds_vault(), vault);
     }
 }
-
-interface IERC20Like {
-    function allowance(address owner, address spender) external view returns (uint256);
-}
