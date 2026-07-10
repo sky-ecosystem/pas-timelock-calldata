@@ -33,7 +33,9 @@ import { Beacon }     from "diamond-pau/Beacon.sol";
 import { PAUFactory } from "diamond-pau/PAUFactory.sol";
 
 import { IAccessControls }         from "diamond-pau/interfaces/IAccessControls.sol";
+import { IAccessControl }          from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { IController }             from "diamond-pau/interfaces/IController.sol";
+import { IRateLimits }             from "diamond-pau/interfaces/IRateLimits.sol";
 import { IEnumerableIntegrations } from "diamond-pau/interfaces/IEnumerableIntegrations.sol";
 
 import { AaveFacet }       from "diamond-pau/facets/aave/AaveFacet.sol";
@@ -102,7 +104,10 @@ contract TimelockCalldataGeneratorTest is DssTest {
     // --- Diamond-pau ---
     Beacon beacon;
     PAUFactory factory;
-    IMainnetControllerFull controller;   // diamond proxy
+    IAccessControls accessControls;
+    address almProxy;
+    IRateLimits rateLimits;
+    IMainnetControllerFull controller;
 
     address pauseProxy;
     address coreCouncil;
@@ -127,12 +132,34 @@ contract TimelockCalldataGeneratorTest is DssTest {
         beamState    = BeamState(pas.beamState);
         configurator = Configurator(pas.configurator);
         timelock     = Timelock(payable(pas.timelock));
+        beacon       = new Beacon(address(this));
+        factory      = new PAUFactory(address(beacon));
         generator    = new TimelockCalldataGenerator(pas.timelock, pas.beamState);
 
-        // Deploy diamond-pau with the Configurator as controller admin
-        // so that `configurator.callControllerAction` (which forwards as msg.sender = configurator)
-        // satisfies the facets' `onlyRole(DEFAULT_ADMIN_ROLE)` checks.
-        _deployDiamondPau(address(configurator));
+        accessControls = IAccessControls(factory.deployAccessControls(address(this)));
+        almProxy       = factory.deployALMProxy(address(this));
+        rateLimits     = IRateLimits(factory.deployRateLimits(address(this)));
+        controller     = IMainnetControllerFull(payable(
+            factory.deployController(address(accessControls), almProxy, address(rateLimits))
+        ));
+
+        accessControls.grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
+        rateLimits.grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
+
+        // Wire the subset of facets the generator targets.
+        bytes32[] memory ids = new bytes32[](11);
+        ids[0]  = _wireAaveFacet();
+        ids[1]  = _wireCCTPFacet();
+        ids[2]  = _wireCentrifugeFacet();
+        ids[3]  = _wireCurveFacet();
+        ids[4]  = _wireERC4626Facet();
+        ids[5]  = _wireLayerZeroFacet();
+        ids[6]  = _wireNFATHaloFacet();
+        ids[7]  = _wireOTCFacet();
+        ids[8]  = _wireUniswapV3Facet();
+        ids[9]  = _wireUniswapV4Facet();
+        ids[10] = _wireUSDSFacet();
+        IController(payable(address(controller))).updateIntegrations(ids);
 
         vm.startPrank(pauseProxy);
         PASInit.init(pas, MIN_DELAY, coreCouncil, new address[](0), new address[](0));
@@ -147,26 +174,30 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         // Onboard diamond controller, rate limiters, and cBeam in BeamState via generator+timelock
         bytes32 id;
-        id = _scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"),     MIN_DELAY));
+        id = _scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"), MIN_DELAY));
         _execute(id);
-        id = _scheduleWithGeneratorData(generator.addRateLimits(SPARK_RATE_LIMITS,   bytes32(0), keccak256("spark-rl"), MIN_DELAY));
+        id = _scheduleWithGeneratorData(generator.addController(address(accessControls), bytes32(0), keccak256("ac"), MIN_DELAY));
         _execute(id);
-        id = _scheduleWithGeneratorData(generator.addRateLimits(GROVE_RATE_LIMITS,   bytes32(0), keccak256("grove-rl"), MIN_DELAY));
+        id = _scheduleWithGeneratorData(generator.addRateLimits(SPARK_RATE_LIMITS, bytes32(0), keccak256("spark-rl"), MIN_DELAY));
         _execute(id);
-        id = _scheduleWithGeneratorData(generator.addCBeam(cBeam,                    bytes32(0), keccak256("cbeam"),    MIN_DELAY));
+        id = _scheduleWithGeneratorData(generator.addRateLimits(GROVE_RATE_LIMITS, bytes32(0), keccak256("grove-rl"), MIN_DELAY));
+        _execute(id);
+        id = _scheduleWithGeneratorData(generator.addCBeam(cBeam, bytes32(0), keccak256("cbeam"), MIN_DELAY));
         _execute(id);
 
         // Verify generator-driven calls correctly configured BeamState
-        assertEq(beamState.controllers(address(controller)), 1, "diamond controller not added");
-        assertEq(beamState.rateLimits(SPARK_RATE_LIMITS),    1, "Spark rate limits not added");
-        assertEq(beamState.rateLimits(GROVE_RATE_LIMITS),    1, "Grove rate limits not added");
-        assertEq(beamState.cBeams(cBeam),                    1, "cBeam not added");
+        assertEq(beamState.controllers(address(controller)),     1, "diamond controller not added");
+        assertEq(beamState.controllers(address(accessControls)), 1, "diamond accessControls not added");
+        assertEq(beamState.rateLimits(SPARK_RATE_LIMITS),        1, "Spark rate limits not added");
+        assertEq(beamState.rateLimits(GROVE_RATE_LIMITS),        1, "Grove rate limits not added");
+        assertEq(beamState.cBeams(cBeam),                        1, "cBeam not added");
 
         // Link cBeam to controllers / rate limiters
         vm.startPrank(coreCouncil);
         beamState.setCBeamForController(address(controller), cBeam);
-        beamState.setCBeamForRateLimits(SPARK_RATE_LIMITS,   cBeam);
-        beamState.setCBeamForRateLimits(GROVE_RATE_LIMITS,   cBeam);
+        beamState.setCBeamForController(address(accessControls), cBeam);
+        beamState.setCBeamForRateLimits(SPARK_RATE_LIMITS, cBeam);
+        beamState.setCBeamForRateLimits(GROVE_RATE_LIMITS, cBeam);
         vm.stopPrank();
 
         // Set hop for rate limiters (required for setRateLimit to work on increases)
@@ -186,41 +217,6 @@ contract TimelockCalldataGeneratorTest is DssTest {
     // ============================================================================
     // Diamond-pau deployment / wiring
     // ============================================================================
-
-    function _deployDiamondPau(address admin) internal {
-        beacon  = new Beacon(address(this));
-        factory = new PAUFactory(address(beacon));
-
-        // Wire the subset of facets the generator targets.
-        bytes32[] memory ids = new bytes32[](11);
-        ids[0]  = _wireAaveFacet();
-        ids[1]  = _wireCCTPFacet();
-        ids[2]  = _wireCentrifugeFacet();
-        ids[3]  = _wireCurveFacet();
-        ids[4]  = _wireERC4626Facet();
-        ids[5]  = _wireLayerZeroFacet();
-        ids[6]  = _wireNFATHaloFacet();
-        ids[7]  = _wireOTCFacet();
-        ids[8]  = _wireUniswapV3Facet();
-        ids[9]  = _wireUniswapV4Facet();
-        ids[10] = _wireUSDSFacet();
-
-        // The factory deploys each component separately; `admin` receives DEFAULT_ADMIN_ROLE on
-        // the AccessControls, which gates both `updateIntegrations` and every facet's admin setter.
-        // (The generator only exercises admin config actions, so the CONTROLLER role grants on the
-        // proxy / rate limiter that operational calls would need are intentionally omitted here.)
-        address accessControls = factory.deployAccessControls(admin);
-        address almProxy       = factory.deployALMProxy(admin);
-        address rateLimits     = factory.deployRateLimits(admin);
-
-        controller = IMainnetControllerFull(payable(
-            factory.deployController(accessControls, almProxy, rateLimits)
-        ));
-
-        // admin pulls the beacon's integration table into the controller's dispatch table.
-        vm.prank(admin);
-        IController(payable(address(controller))).updateIntegrations(ids);
-    }
 
     function _wireAaveFacet() internal returns (bytes32 id) {
         address facet = address(new AaveFacet());
@@ -481,15 +477,15 @@ contract TimelockCalldataGeneratorTest is DssTest {
     }
 
     function testAddRateLimits() public {
-        address rateLimits = makeAddr("rateLimits");
+        address rateLimits_ = makeAddr("rateLimits");
         bytes32 salt = keccak256("rl");
-        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addRateLimits.selector, rateLimits), PREDECESSOR, salt);
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addRateLimits.selector, rateLimits_), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.addRateLimits(rateLimits, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleWithGeneratorData(generator.addRateLimits(rateLimits_, PREDECESSOR, salt, MIN_DELAY));
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
-        assertEq(beamState.rateLimits(rateLimits), 1);
+        assertEq(beamState.rateLimits(rateLimits_), 1);
     }
 
     function testAddController() public {
@@ -516,10 +512,10 @@ contract TimelockCalldataGeneratorTest is DssTest {
         assertEq(beamState.cBeams(beam), 1);
     }
 
-    function _checkAddInitRateLimits(address rateLimits, bytes32 key, bytes32 salt) internal {
+    function _checkAddInitRateLimits(address rateLimits_, bytes32 key, bytes32 salt) internal {
         RateLimitConfig memory config = RateLimitConfig({
             key: key,
-            rateLimits: rateLimits,
+            rateLimits: rateLimits_,
             maxAmount: 10_000_000e18,
             slope: 1_000_000e18
         });
@@ -536,16 +532,16 @@ contract TimelockCalldataGeneratorTest is DssTest {
         _execute(id);
 
         // Verify stored in BeamState
-        BeamState.DefaultRateLimits memory limits = beamState.getInitRateLimits(config.key, rateLimits);
+        BeamState.DefaultRateLimits memory limits = beamState.getInitRateLimits(config.key, rateLimits_);
         assertEq(limits.maxAmount, config.maxAmount);
         assertEq(limits.slope, config.slope);
 
         // Execute on real rate limiter via Configurator
         vm.prank(cBeam);
-        configurator.setRateLimit(rateLimits, config.key, config.maxAmount, config.slope);
+        configurator.setRateLimit(rateLimits_, config.key, config.maxAmount, config.slope);
 
         // Verify set on real rate limiter
-        (uint256 setMax, uint256 setSlope,,) = RateLimitsLike(rateLimits).getRateLimitData(config.key);
+        (uint256 setMax, uint256 setSlope,,) = RateLimitsLike(rateLimits_).getRateLimitData(config.key);
         assertEq(setMax, config.maxAmount);
         assertEq(setSlope, config.slope);
     }
@@ -558,10 +554,10 @@ contract TimelockCalldataGeneratorTest is DssTest {
         _checkAddInitRateLimits(GROVE_RATE_LIMITS, keccak256("grove-deposit"), keccak256("initG"));
     }
 
-    function _checkBatchAddInitRateLimits(address rateLimits, bytes32 key1, bytes32 key2, bytes32 salt) internal {
+    function _checkBatchAddInitRateLimits(address rateLimits_, bytes32 key1, bytes32 key2, bytes32 salt) internal {
         RateLimitConfig[] memory configs = new RateLimitConfig[](2);
-        configs[0] = RateLimitConfig(key1, rateLimits, 5_000_000e18, 500_000e18);
-        configs[1] = RateLimitConfig(key2, rateLimits, 3_000_000e18, 300_000e18);
+        configs[0] = RateLimitConfig(key1, rateLimits_, 5_000_000e18, 500_000e18);
+        configs[1] = RateLimitConfig(key2, rateLimits_, 3_000_000e18, 300_000e18);
 
         // Pre-compute expected operationId for batch
         address[] memory targets = new address[](2);
@@ -582,21 +578,21 @@ contract TimelockCalldataGeneratorTest is DssTest {
         timelock.executeBatch(targets, values, payloads, PREDECESSOR, salt);
 
         // Verify stored in BeamState
-        assertEq(beamState.getInitRateLimits(configs[0].key, rateLimits).maxAmount, configs[0].maxAmount);
-        assertEq(beamState.getInitRateLimits(configs[1].key, rateLimits).maxAmount, configs[1].maxAmount);
+        assertEq(beamState.getInitRateLimits(configs[0].key, rateLimits_).maxAmount, configs[0].maxAmount);
+        assertEq(beamState.getInitRateLimits(configs[1].key, rateLimits_).maxAmount, configs[1].maxAmount);
 
         // Execute on real rate limiter via Configurator
         vm.startPrank(cBeam);
-        configurator.setRateLimit(rateLimits, configs[0].key, configs[0].maxAmount, configs[0].slope);
-        configurator.setRateLimit(rateLimits, configs[1].key, configs[1].maxAmount, configs[1].slope);
+        configurator.setRateLimit(rateLimits_, configs[0].key, configs[0].maxAmount, configs[0].slope);
+        configurator.setRateLimit(rateLimits_, configs[1].key, configs[1].maxAmount, configs[1].slope);
         vm.stopPrank();
 
         // Verify set on real rate limiter
-        (uint256 max0, uint256 slope0,,) = RateLimitsLike(rateLimits).getRateLimitData(configs[0].key);
+        (uint256 max0, uint256 slope0,,) = RateLimitsLike(rateLimits_).getRateLimitData(configs[0].key);
         assertEq(max0, configs[0].maxAmount);
         assertEq(slope0, configs[0].slope);
 
-        (uint256 max1, uint256 slope1,,) = RateLimitsLike(rateLimits).getRateLimitData(configs[1].key);
+        (uint256 max1, uint256 slope1,,) = RateLimitsLike(rateLimits_).getRateLimitData(configs[1].key);
         assertEq(max1, configs[1].maxAmount);
         assertEq(slope1, configs[1].slope);
     }
@@ -607,6 +603,66 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
     function testBatchAddInitRateLimitsOnGrove() public {
         _checkBatchAddInitRateLimits(GROVE_RATE_LIMITS, keccak256("grove-batch-1"), keccak256("grove-batch-2"), keccak256("batchG"));
+    }
+
+    // ============================================================================
+    // Roles Management Tests (through AccessControls)
+    // ============================================================================
+
+    function testGrantRole() public {
+        bytes32 role    = keccak256("SOME_ROLE");
+        address account = makeAddr("roleAccount");
+        bytes32 salt    = keccak256("grant-role");
+
+        assertFalse(accessControls.hasRole(role, account), "account already has role");
+
+        bytes memory expected = abi.encodeCall(IAccessControl.grantRole, (role, account));
+        _runControllerAction(
+            generator.grantRole(role, account, address(accessControls), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(accessControls),
+            salt
+        );
+
+        assertTrue(accessControls.hasRole(role, account), "role not granted");
+    }
+
+    function testRevokeRole() public {
+        bytes32 role    = keccak256("SOME_ROLE");
+        address account = makeAddr("roleAccount");
+        bytes32 salt    = keccak256("revoke-role");
+
+        // Grant the role first (test contract is the AccessControls admin).
+        accessControls.grantRole(role, account);
+        assertTrue(accessControls.hasRole(role, account), "role not granted for revoke setup");
+
+        bytes memory expected = abi.encodeCall(IAccessControl.revokeRole, (role, account));
+        _runControllerAction(
+            generator.revokeRole(role, account, address(accessControls), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(accessControls),
+            salt
+        );
+
+        assertFalse(accessControls.hasRole(role, account), "role not revoked");
+    }
+
+    function testSetRoleAdmin() public {
+        bytes32 role      = keccak256("SOME_ROLE");
+        bytes32 adminRole = keccak256("SOME_ADMIN_ROLE");
+        bytes32 salt      = keccak256("set-role-admin");
+
+        assertEq(accessControls.getRoleAdmin(role), OZ_DEFAULT_ADMIN_ROLE, "unexpected initial role admin");
+
+        bytes memory expected = abi.encodeCall(IAccessControls.setRoleAdmin, (role, adminRole));
+        _runControllerAction(
+            generator.setRoleAdmin(role, adminRole, address(accessControls), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(accessControls),
+            salt
+        );
+
+        assertEq(accessControls.getRoleAdmin(role), adminRole, "role admin not updated");
     }
 
     // ============================================================================

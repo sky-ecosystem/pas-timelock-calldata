@@ -38,6 +38,12 @@ interface BeamStateLike {
     function addInitControllerActions(bytes calldata data, address controller) external returns (bytes32 key);
 }
 
+interface AccessControlsLike {
+    function grantRole(bytes32 role, address account) external;
+    function revokeRole(bytes32 role, address account) external;
+    function setRoleAdmin(bytes32 role, bytes32 adminRole) external;
+}
+
 // Controller-level admin selectors. The diamond wires each facet's function under a
 // globally-unique controller-level selector (e.g. `aave_setMaxSlippage` rather than the
 // bare `setMaxSlippage` that several facets share), so the generator emits calldata
@@ -160,6 +166,44 @@ contract TimelockCalldataGenerator {
             );
         }
         data = abi.encodeCall(timelock.scheduleBatch, (targets, new uint256[](len), payloads, predecessor, salt, delay));
+    }
+
+    // Roles Management Actions (through AccessControls)
+
+    function grantRole(
+        bytes32 role,
+        address account,
+        address accessControls,
+        bytes32 predecessor,
+        bytes32 salt,
+        uint256 delay
+    ) external view returns (bytes memory data) {
+        bytes memory accessControlsData = abi.encodeCall(AccessControlsLike.grantRole, (role, account));
+        data = _encodeControllerAction(accessControlsData, accessControls, predecessor, salt, delay);
+    }
+
+    function revokeRole(
+        bytes32 role,
+        address account,
+        address accessControls,
+        bytes32 predecessor,
+        bytes32 salt,
+        uint256 delay
+    ) external view returns (bytes memory data) {
+        bytes memory accessControlsData = abi.encodeCall(AccessControlsLike.revokeRole, (role, account));
+        data = _encodeControllerAction(accessControlsData, accessControls, predecessor, salt, delay);
+    }
+
+    function setRoleAdmin(
+        bytes32 role,
+        bytes32 adminRole,
+        address accessControls,
+        bytes32 predecessor,
+        bytes32 salt,
+        uint256 delay
+    ) external view returns (bytes memory data) {
+        bytes memory accessControlsData = abi.encodeCall(AccessControlsLike.setRoleAdmin, (role, adminRole));
+        data = _encodeControllerAction(accessControlsData, accessControls, predecessor, salt, delay);
     }
 
     // --- Controller Actions (Diamond-PAU facets) ---
