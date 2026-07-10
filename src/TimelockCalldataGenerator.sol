@@ -51,6 +51,8 @@ interface AccessControlsLike {
 // facet. These signatures are copied verbatim (only the ones this generator uses) from
 // diamond-pau's `IMainnetControllerFull`; keep them in sync if a facet signature changes.
 interface ControllerLike {
+    function updateIntegrations(bytes32[] calldata ids) external;
+    function removeIntegrations(bytes32[] calldata ids) external;
     function aave_setMaxSlippage(address aToken, uint256 maxSlippage) external;
     function cctp_setDomainParameters(uint32 destinationDomain, bytes32 recipient, uint32 minFeeCapRate, uint32 maxFeeCapRate) external;
     function centrifuge_setRecipient(uint16 centrifugeId, bytes32 recipient) external;
@@ -204,6 +206,30 @@ contract TimelockCalldataGenerator {
     ) external view returns (bytes memory data) {
         bytes memory accessControlsData = abi.encodeCall(AccessControlsLike.setRoleAdmin, (role, adminRole));
         data = _encodeControllerAction(accessControlsData, accessControls, predecessor, salt, delay);
+    }
+
+    // --- Controller Actions (native functions) ---
+
+    function updateIntegrations(
+        bytes32[] calldata ids,
+        address controller,
+        bytes32 predecessor,
+        bytes32 salt,
+        uint256 delay
+    ) external view returns (bytes memory data) {
+        bytes memory controllerData = abi.encodeCall(ControllerLike.updateIntegrations, (ids));
+        data = _encodeControllerAction(controllerData, controller, predecessor, salt, delay);
+    }
+
+    function removeIntegrations(
+        bytes32[] calldata ids,
+        address controller,
+        bytes32 predecessor,
+        bytes32 salt,
+        uint256 delay
+    ) external view returns (bytes memory data) {
+        bytes memory controllerData = abi.encodeCall(ControllerLike.removeIntegrations, (ids));
+        data = _encodeControllerAction(controllerData, controller, predecessor, salt, delay);
     }
 
     // --- Controller Actions (Diamond-PAU facets) ---

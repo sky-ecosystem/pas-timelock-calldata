@@ -666,6 +666,73 @@ contract TimelockCalldataGeneratorTest is DssTest {
     }
 
     // ============================================================================
+    // Integration Management Tests (updateIntegrations / removeIntegrations)
+    // ============================================================================
+
+    // Wires a fresh facet into the Beacon under `id` using a call selector that is not already
+    // wired by any facet in setUp (so updateIntegrations can add it without a dispatch collision).
+    function _wireExtraFacet(bytes32 id, bytes4 callSelector) internal returns (address facet) {
+        facet = address(new AaveFacet());
+
+        IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](1);
+        wires[0] = IEnumerableIntegrations.Wire(callSelector, IAaveFacet.getMaxSlippage.selector);
+
+        beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
+    }
+
+    function testUpdateIntegrations() public {
+        bytes32 integrationId = "EXTRA_FACET";
+        bytes4  callSelector  = bytes4(keccak256("extra_dummy_selector()"));
+        bytes32 salt          = keccak256("update-integrations");
+
+        // Register the new integration in the Beacon and confirm it isn't on the controller yet.
+        address facet = _wireExtraFacet(integrationId, callSelector);
+        assertEq(controller.getConfig(integrationId).facet, address(0), "integration already present");
+        uint256 countBefore = controller.integrations().length;
+
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = integrationId;
+
+        bytes memory expected = abi.encodeCall(IController.updateIntegrations, (ids));
+        _runControllerAction(
+            generator.updateIntegrations(ids, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.getConfig(integrationId).facet, facet, "integration not added");
+        assertEq(controller.integrations().length, countBefore + 1, "integration count not incremented");
+        assertEq(controller.getDispatch(callSelector).facet, facet, "dispatch not wired");
+    }
+
+    function testRemoveIntegrations() public {
+        // "USDS_FACET" was wired onto the controller in setUp.
+        bytes32 integrationId = "USDS_FACET";
+        bytes32 salt          = keccak256("remove-integrations");
+
+        assertNotEq(controller.getConfig(integrationId).facet, address(0), "integration not present");
+        uint256 countBefore = controller.integrations().length;
+        bytes4  usdsSelector = IMainnetControllerFull.usds_setVault.selector;
+        assertNotEq(controller.getDispatch(usdsSelector).facet, address(0), "dispatch not wired before removal");
+
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = integrationId;
+
+        bytes memory expected = abi.encodeCall(IController.removeIntegrations, (ids));
+        _runControllerAction(
+            generator.removeIntegrations(ids, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            expected,
+            address(controller),
+            salt
+        );
+
+        assertEq(controller.getConfig(integrationId).facet, address(0), "integration not removed");
+        assertEq(controller.integrations().length, countBefore - 1, "integration count not decremented");
+        assertEq(controller.getDispatch(usdsSelector).facet, address(0), "dispatch not cleared");
+    }
+
+    // ============================================================================
     // Controller Action Tests (real diamond-pau facets)
     // ============================================================================
 
