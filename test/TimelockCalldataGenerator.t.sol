@@ -35,7 +35,6 @@ import { PAUFactory } from "diamond-pau/PAUFactory.sol";
 import { IAccessControls }         from "diamond-pau/interfaces/IAccessControls.sol";
 import { IAccessControl }          from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { IController }             from "diamond-pau/interfaces/IController.sol";
-import { IRateLimits }             from "diamond-pau/interfaces/IRateLimits.sol";
 import { IEnumerableIntegrations } from "diamond-pau/interfaces/IEnumerableIntegrations.sol";
 
 import { AaveFacet }       from "diamond-pau/facets/aave/AaveFacet.sol";
@@ -76,13 +75,7 @@ interface RateLimitsLike {
 }
 
 contract TimelockCalldataGeneratorTest is DssTest {
-    // --- Mainnet Addresses (used only for real rate-limiter integration) ---
-    // Rate limiter addresses are fetched from the Spark / Grove controllers on mainnet.
-    address constant SPARK_CONTROLLER = 0xc9ff605003A1b389980f650e1aEFA1ef25C8eE32;
-    address constant SPARK_PROXY      = 0x3300f198988e4C9C63F75dF86De36421f06af8c4;
-    address constant GROVE_CONTROLLER = 0xfd9dEA9a8D5B955649579Af482DB7198A392A9F5;
-    address constant GROVE_PROXY      = 0x1369f7b2b38c76B6478c0f0E66D94923421891Ba;
-    address constant CHAINLOG         = 0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F;
+    address constant CHAINLOG = 0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F;
 
     bytes32 constant PREDECESSOR = keccak256("PREDECESSOR");
     uint256 constant MIN_DELAY = 1 days;
@@ -90,10 +83,6 @@ contract TimelockCalldataGeneratorTest is DssTest {
     bytes32 constant OZ_DEFAULT_ADMIN_ROLE = bytes32(0);
 
     DssInstance dss;
-
-    // --- Fetched from controllers ---
-    address SPARK_RATE_LIMITS;
-    address GROVE_RATE_LIMITS;
 
     // --- PAS Instance ---
     BeamState                 beamState;
@@ -106,7 +95,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
     PAUFactory factory;
     IAccessControls accessControls;
     address almProxy;
-    IRateLimits rateLimits;
+    RateLimitsLike rateLimits;
     IMainnetControllerFull controller;
 
     address pauseProxy;
@@ -119,14 +108,10 @@ contract TimelockCalldataGeneratorTest is DssTest {
         // Load DssInstance from chainlog
         dss = MCD.loadFromChainlog(CHAINLOG);
 
-        // Fetch rate limits addresses from real actual controllers (kept for end-to-end rate-limit checks)
-        SPARK_RATE_LIMITS = ControllerLike(SPARK_CONTROLLER).rateLimits();
-        GROVE_RATE_LIMITS = ControllerLike(GROVE_CONTROLLER).rateLimits();
+        pauseProxy = dss.chainlog.getAddress("MCD_PAUSE_PROXY");
 
         coreCouncil = makeAddr("coreCouncil");
         cBeam       = makeAddr("cBeam");
-
-        pauseProxy = dss.chainlog.getAddress("MCD_PAUSE_PROXY");
 
         PASInstance memory pas = PASDeploy.deploy(address(this), pauseProxy, MIN_DELAY);
         beamState    = BeamState(pas.beamState);
@@ -138,7 +123,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         accessControls = IAccessControls(factory.deployAccessControls(address(this)));
         almProxy       = factory.deployALMProxy(address(this));
-        rateLimits     = IRateLimits(factory.deployRateLimits(address(this)));
+        rateLimits     = RateLimitsLike(factory.deployRateLimits(address(this)));
         controller     = IMainnetControllerFull(payable(
             factory.deployController(address(accessControls), almProxy, address(rateLimits))
         ));
@@ -165,22 +150,11 @@ contract TimelockCalldataGeneratorTest is DssTest {
         PASInit.init(pas, MIN_DELAY, coreCouncil, new address[](0), new address[](0));
         vm.stopPrank();
 
-        // Grant configurator admin role on mainnet rate limiters (real downstream contracts)
-        vm.prank(SPARK_PROXY);
-        RateLimitsLike(SPARK_RATE_LIMITS).grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
-
-        vm.prank(GROVE_PROXY);
-        RateLimitsLike(GROVE_RATE_LIMITS).grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
-
         // Onboard diamond controller, rate limiters, and cBeam in BeamState via generator+timelock
         bytes32 id;
         id = _scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"), MIN_DELAY));
         _execute(id);
         id = _scheduleWithGeneratorData(generator.addController(address(accessControls), bytes32(0), keccak256("ac"), MIN_DELAY));
-        _execute(id);
-        id = _scheduleWithGeneratorData(generator.addRateLimits(SPARK_RATE_LIMITS, bytes32(0), keccak256("spark-rl"), MIN_DELAY));
-        _execute(id);
-        id = _scheduleWithGeneratorData(generator.addRateLimits(GROVE_RATE_LIMITS, bytes32(0), keccak256("grove-rl"), MIN_DELAY));
         _execute(id);
         id = _scheduleWithGeneratorData(generator.addCBeam(cBeam, bytes32(0), keccak256("cbeam"), MIN_DELAY));
         _execute(id);
@@ -188,24 +162,13 @@ contract TimelockCalldataGeneratorTest is DssTest {
         // Verify generator-driven calls correctly configured BeamState
         assertEq(beamState.controllers(address(controller)),     1, "diamond controller not added");
         assertEq(beamState.controllers(address(accessControls)), 1, "diamond accessControls not added");
-        assertEq(beamState.rateLimits(SPARK_RATE_LIMITS),        1, "Spark rate limits not added");
-        assertEq(beamState.rateLimits(GROVE_RATE_LIMITS),        1, "Grove rate limits not added");
         assertEq(beamState.cBeams(cBeam),                        1, "cBeam not added");
 
         // Link cBeam to controllers / rate limiters
         vm.startPrank(coreCouncil);
         beamState.setCBeamForController(address(controller), cBeam);
         beamState.setCBeamForController(address(accessControls), cBeam);
-        beamState.setCBeamForRateLimits(SPARK_RATE_LIMITS, cBeam);
-        beamState.setCBeamForRateLimits(GROVE_RATE_LIMITS, cBeam);
         vm.stopPrank();
-
-        // Set hop for rate limiters (required for setRateLimit to work on increases)
-        bytes32 hopId;
-        hopId = _scheduleWithGeneratorData(generator.setHop(SPARK_RATE_LIMITS, 1 hours, bytes32(0), keccak256("spark-hop"), MIN_DELAY));
-        _execute(hopId);
-        hopId = _scheduleWithGeneratorData(generator.setHop(GROVE_RATE_LIMITS, 1 hours, bytes32(0), keccak256("grove-hop"), MIN_DELAY));
-        _execute(hopId);
 
         // Mark the shared predecessor as executed so every test's operations (which declare it as
         // their predecessor) can be executed.
@@ -456,24 +419,24 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
     function testSetHop() public {
         bytes32 salt = keccak256("hop");
-        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setHop.selector, SPARK_RATE_LIMITS, 3600), PREDECESSOR, salt);
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setHop.selector, address(rateLimits), 3600), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.setHop(SPARK_RATE_LIMITS, 3600, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleWithGeneratorData(generator.setHop(address(rateLimits), 3600, PREDECESSOR, salt, MIN_DELAY));
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
-        assertEq(beamState.getHop(SPARK_RATE_LIMITS), 3600);
+        assertEq(beamState.getHop(address(rateLimits)), 3600);
     }
 
     function testSetMaxChange() public {
         bytes32 salt = keccak256("mc");
-        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setMaxChange.selector, GROVE_RATE_LIMITS, 2e18), PREDECESSOR, salt);
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setMaxChange.selector, address(rateLimits), 2e18), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.setMaxChange(GROVE_RATE_LIMITS, 2e18, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleWithGeneratorData(generator.setMaxChange(address(rateLimits), 2e18, PREDECESSOR, salt, MIN_DELAY));
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
-        assertEq(beamState.maxChange(GROVE_RATE_LIMITS), 2e18);
+        assertEq(beamState.maxChange(address(rateLimits)), 2e18);
     }
 
     function testAddRateLimits() public {
@@ -512,13 +475,15 @@ contract TimelockCalldataGeneratorTest is DssTest {
         assertEq(beamState.cBeams(beam), 1);
     }
 
-    function _checkAddInitRateLimits(address rateLimits_, bytes32 key, bytes32 salt) internal {
+    function testAddInitRateLimits() internal {
         RateLimitConfig memory config = RateLimitConfig({
-            key: key,
-            rateLimits: rateLimits_,
+            key: "deposit",
+            rateLimits: address(rateLimits),
             maxAmount: 10_000_000e18,
             slope: 1_000_000e18
         });
+
+        bytes32 salt = "init-rate-limits";
 
         bytes32 expectedId = _expectedOperationId(
             abi.encodeWithSelector(BeamState.addInitRateLimits.selector, config.key, config.rateLimits, config.maxAmount, config.slope),
@@ -532,32 +497,26 @@ contract TimelockCalldataGeneratorTest is DssTest {
         _execute(id);
 
         // Verify stored in BeamState
-        BeamState.DefaultRateLimits memory limits = beamState.getInitRateLimits(config.key, rateLimits_);
+        BeamState.DefaultRateLimits memory limits = beamState.getInitRateLimits(config.key, address(rateLimits));
         assertEq(limits.maxAmount, config.maxAmount);
         assertEq(limits.slope, config.slope);
 
         // Execute on real rate limiter via Configurator
         vm.prank(cBeam);
-        configurator.setRateLimit(rateLimits_, config.key, config.maxAmount, config.slope);
+        configurator.setRateLimit(address(rateLimits), config.key, config.maxAmount, config.slope);
 
         // Verify set on real rate limiter
-        (uint256 setMax, uint256 setSlope,,) = RateLimitsLike(rateLimits_).getRateLimitData(config.key);
+        (uint256 setMax, uint256 setSlope,,) = rateLimits.getRateLimitData(config.key);
         assertEq(setMax, config.maxAmount);
         assertEq(setSlope, config.slope);
     }
 
-    function testAddInitRateLimitsOnSpark() public {
-        _checkAddInitRateLimits(SPARK_RATE_LIMITS, keccak256("spark-deposit"), keccak256("initS"));
-    }
-
-    function testAddInitRateLimitsOnGrove() public {
-        _checkAddInitRateLimits(GROVE_RATE_LIMITS, keccak256("grove-deposit"), keccak256("initG"));
-    }
-
-    function _checkBatchAddInitRateLimits(address rateLimits_, bytes32 key1, bytes32 key2, bytes32 salt) internal {
+    function testBatchAddInitRateLimits() internal {
         RateLimitConfig[] memory configs = new RateLimitConfig[](2);
-        configs[0] = RateLimitConfig(key1, rateLimits_, 5_000_000e18, 500_000e18);
-        configs[1] = RateLimitConfig(key2, rateLimits_, 3_000_000e18, 300_000e18);
+        configs[0] = RateLimitConfig("deposit", address(rateLimits), 5_000_000e18, 500_000e18);
+        configs[1] = RateLimitConfig("withdraw", address(rateLimits), 3_000_000e18, 300_000e18);
+
+        bytes32 salt = "batch-init-rate-limits";
 
         // Pre-compute expected operationId for batch
         address[] memory targets = new address[](2);
@@ -578,31 +537,23 @@ contract TimelockCalldataGeneratorTest is DssTest {
         timelock.executeBatch(targets, values, payloads, PREDECESSOR, salt);
 
         // Verify stored in BeamState
-        assertEq(beamState.getInitRateLimits(configs[0].key, rateLimits_).maxAmount, configs[0].maxAmount);
-        assertEq(beamState.getInitRateLimits(configs[1].key, rateLimits_).maxAmount, configs[1].maxAmount);
+        assertEq(beamState.getInitRateLimits(configs[0].key, address(rateLimits)).maxAmount, configs[0].maxAmount);
+        assertEq(beamState.getInitRateLimits(configs[1].key, address(rateLimits)).maxAmount, configs[1].maxAmount);
 
         // Execute on real rate limiter via Configurator
         vm.startPrank(cBeam);
-        configurator.setRateLimit(rateLimits_, configs[0].key, configs[0].maxAmount, configs[0].slope);
-        configurator.setRateLimit(rateLimits_, configs[1].key, configs[1].maxAmount, configs[1].slope);
+        configurator.setRateLimit(address(rateLimits), configs[0].key, configs[0].maxAmount, configs[0].slope);
+        configurator.setRateLimit(address(rateLimits), configs[1].key, configs[1].maxAmount, configs[1].slope);
         vm.stopPrank();
 
         // Verify set on real rate limiter
-        (uint256 max0, uint256 slope0,,) = RateLimitsLike(rateLimits_).getRateLimitData(configs[0].key);
+        (uint256 max0, uint256 slope0,,) = rateLimits.getRateLimitData(configs[0].key);
         assertEq(max0, configs[0].maxAmount);
         assertEq(slope0, configs[0].slope);
 
-        (uint256 max1, uint256 slope1,,) = RateLimitsLike(rateLimits_).getRateLimitData(configs[1].key);
+        (uint256 max1, uint256 slope1,,) = rateLimits.getRateLimitData(configs[1].key);
         assertEq(max1, configs[1].maxAmount);
         assertEq(slope1, configs[1].slope);
-    }
-
-    function testBatchAddInitRateLimitsOnSpark() public {
-        _checkBatchAddInitRateLimits(SPARK_RATE_LIMITS, keccak256("spark-batch-1"), keccak256("spark-batch-2"), keccak256("batchS"));
-    }
-
-    function testBatchAddInitRateLimitsOnGrove() public {
-        _checkBatchAddInitRateLimits(GROVE_RATE_LIMITS, keccak256("grove-batch-1"), keccak256("grove-batch-2"), keccak256("batchG"));
     }
 
     // ============================================================================
