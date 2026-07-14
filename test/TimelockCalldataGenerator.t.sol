@@ -63,7 +63,6 @@ import { IUSDSFacet }       from "diamond-pau/facets/usds/IUSDSFacet.sol";
 
 import { IMainnetControllerFull } from "diamond-pau-test/interfaces/IMainnetControllerFull.sol";
 
-import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 interface ControllerLike {
     function rateLimits() external view returns (address);

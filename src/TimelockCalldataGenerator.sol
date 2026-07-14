@@ -170,7 +170,7 @@ contract TimelockCalldataGenerator {
         data = abi.encodeCall(timelock.scheduleBatch, (targets, new uint256[](len), payloads, predecessor, salt, delay));
     }
 
-    // Roles Management Actions (through AccessControls)
+    // --- Roles Management Actions (through AccessControls) ---
 
     function grantRole(
         bytes32 role,
