@@ -395,7 +395,6 @@ contract TimelockCalldataGeneratorTest is DssTest {
     function testConstructor() public {
         TimelockCalldataGenerator newGen = new TimelockCalldataGenerator(address(timelock), address(beamState));
 
-        assertEq(address(newGen.timelock()),  address(timelock),  "Timelock set correctly");
         assertEq(address(newGen.beamState()), address(beamState), "BeamState set correctly");
     }
 

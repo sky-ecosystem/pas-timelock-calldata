@@ -82,11 +82,9 @@ struct RateLimitConfig {
 
 contract TimelockCalldataGenerator {
 
-    TimelockLike  public immutable timelock;
     BeamStateLike public immutable beamState;
 
-    constructor(address timelock_, address beamState_) {
-        timelock  = TimelockLike(timelock_);
+    constructor(address beamState_) {
         beamState = BeamStateLike(beamState_);
     }
 
@@ -95,7 +93,7 @@ contract TimelockCalldataGenerator {
         targets[0] = address(beamState);
         bytes[] memory payloads = new bytes[](1);
         payloads[0] = payload;
-        data = abi.encodeCall(timelock.scheduleBatch, (targets, new uint256[](1), payloads, predecessor, salt, delay));
+        data = abi.encodeCall(TimelockLike.scheduleBatch, (targets, new uint256[](1), payloads, predecessor, salt, delay));
     }
 
     function _encodeControllerAction(bytes memory controllerData, address controller, bytes32 predecessor, bytes32 salt, uint256 delay) internal view returns (bytes memory data) {
@@ -167,7 +165,7 @@ contract TimelockCalldataGenerator {
                 (configs[i].key, configs[i].rateLimits, configs[i].maxAmount, configs[i].slope)
             );
         }
-        data = abi.encodeCall(timelock.scheduleBatch, (targets, new uint256[](len), payloads, predecessor, salt, delay));
+        data = abi.encodeCall(TimelockLike.scheduleBatch, (targets, new uint256[](len), payloads, predecessor, salt, delay));
     }
 
     // --- Roles Management Actions (through AccessControls) ---
