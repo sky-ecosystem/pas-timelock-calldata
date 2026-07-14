@@ -151,24 +151,26 @@ contract TimelockCalldataGeneratorTest is DssTest {
         vm.stopPrank();
 
         // Onboard diamond controller, rate limiters, and cBeam in BeamState via generator+timelock
-        bytes32 id;
-        id = _scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"), MIN_DELAY));
-        _execute(id);
-        id = _scheduleWithGeneratorData(generator.addController(address(accessControls), bytes32(0), keccak256("ac"), MIN_DELAY));
-        _execute(id);
-        id = _scheduleWithGeneratorData(generator.addCBeam(cBeam, bytes32(0), keccak256("cbeam"), MIN_DELAY));
-        _execute(id);
+        _execute(_scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"), MIN_DELAY)));
+        _execute(_scheduleWithGeneratorData(generator.addController(address(accessControls), bytes32(0), keccak256("ac"), MIN_DELAY)));
+        _execute(_scheduleWithGeneratorData(generator.addRateLimits(address(rateLimits), bytes32(0), keccak256("rl"), MIN_DELAY)));
+        _execute(_scheduleWithGeneratorData(generator.addCBeam(cBeam, bytes32(0), keccak256("cbeam"), MIN_DELAY)));
 
         // Verify generator-driven calls correctly configured BeamState
         assertEq(beamState.controllers(address(controller)),     1, "diamond controller not added");
         assertEq(beamState.controllers(address(accessControls)), 1, "diamond accessControls not added");
+        assertEq(beamState.rateLimits(address(rateLimits)),      1, "rateLimits not added");
         assertEq(beamState.cBeams(cBeam),                        1, "cBeam not added");
 
         // Link cBeam to controllers / rate limiters
         vm.startPrank(coreCouncil);
         beamState.setCBeamForController(address(controller), cBeam);
         beamState.setCBeamForController(address(accessControls), cBeam);
+        beamState.setCBeamForRateLimits(address(rateLimits), cBeam);
         vm.stopPrank();
+
+        // Set hop for rate limiters (required for setRateLimit to work on increases)
+        _execute(_scheduleWithGeneratorData(generator.setHop(address(rateLimits), 1 hours, bytes32(0), keccak256("rl-hop"), MIN_DELAY)));
 
         // Mark the shared predecessor as executed so every test's operations (which declare it as
         // their predecessor) can be executed.
@@ -475,7 +477,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         assertEq(beamState.cBeams(beam), 1);
     }
 
-    function testAddInitRateLimits() internal {
+    function testAddInitRateLimits() public {
         RateLimitConfig memory config = RateLimitConfig({
             key: "deposit",
             rateLimits: address(rateLimits),
@@ -511,7 +513,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         assertEq(setSlope, config.slope);
     }
 
-    function testBatchAddInitRateLimits() internal {
+    function testBatchAddInitRateLimits() public {
         RateLimitConfig[] memory configs = new RateLimitConfig[](2);
         configs[0] = RateLimitConfig("deposit", address(rateLimits), 5_000_000e18, 500_000e18);
         configs[1] = RateLimitConfig("withdraw", address(rateLimits), 3_000_000e18, 300_000e18);
