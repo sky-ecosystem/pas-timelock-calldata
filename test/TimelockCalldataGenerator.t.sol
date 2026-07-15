@@ -551,6 +551,51 @@ contract TimelockCalldataGeneratorTest is DssTest {
         assertEq(slope1, configs[1].slope);
     }
 
+    function testBatchArbitraryCalls() public {
+        address newController = makeAddr("arbitraryController");
+        address beam          = makeAddr("arbitraryCBeam");
+
+        // A controller action to whitelist as part of the batch.
+        bytes32 role    = keccak256("BATCH_ROLE");
+        address account = makeAddr("batchRoleAccount");
+        bytes memory controllerAction = abi.encodeCall(IAccessControl.grantRole, (role, account));
+
+        // Heterogeneous batch: several different BeamState calls in one scheduled operation,
+        // including staging a controller action. batchArbitraryCalls targets BeamState for every payload.
+        bytes[] memory payloads = new bytes[](3);
+        payloads[0] = abi.encodeWithSelector(BeamState.addController.selector, newController);
+        payloads[1] = abi.encodeWithSelector(BeamState.addCBeam.selector, beam);
+        payloads[2] = abi.encodeWithSelector(BeamState.addInitControllerActions.selector, controllerAction, address(accessControls));
+
+        address[] memory targets = new address[](3);
+        targets[0] = address(beamState);
+        targets[1] = address(beamState);
+        targets[2] = address(beamState);
+
+        bytes32 salt = "batch-arbitrary-calls";
+
+        bytes32 expectedId = timelock.hashOperationBatch(targets, new uint256[](3), payloads, PREDECESSOR, salt);
+
+        bytes32 id = _scheduleWithGeneratorData(generator.batchArbitraryCalls(payloads, PREDECESSOR, salt, MIN_DELAY));
+        assertEq(id, expectedId);
+        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
+
+        vm.warp(block.timestamp + MIN_DELAY);
+        timelock.executeBatch(targets, new uint256[](3), payloads, PREDECESSOR, salt);
+
+        assertEq(beamState.controllers(newController), 1, "controller not added");
+        assertEq(beamState.cBeams(beam),               1, "cBeam not added");
+        assertTrue(
+            beamState.isControllerActionEnabled(keccak256(controllerAction), address(accessControls)),
+            "controller action not whitelisted"
+        );
+
+        // The whitelisted action is now callable through the Configurator.
+        vm.prank(cBeam);
+        configurator.callControllerAction(address(accessControls), controllerAction);
+        assertTrue(accessControls.hasRole(role, account), "role not granted via whitelisted action");
+    }
+
     // ============================================================================
     // Roles Management Tests (through AccessControls)
     // ============================================================================

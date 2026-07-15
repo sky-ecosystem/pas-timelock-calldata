@@ -16,7 +16,7 @@ centralizes the encoding so proposers get correct calldata from a single, well-t
 
 ## How it works
 
-The generator produces calldata for two shapes of operation:
+The generator produces calldata for these shapes of operation:
 
 1. **Direct BeamState configuration.** Functions like `start`, `setHop`, and `addController` encode
    a single payload that calls the corresponding `BeamState` function directly, then wrap it in
@@ -26,6 +26,9 @@ The generator produces calldata for two shapes of operation:
    the inner call, wrap it in `BeamState.addInitControllerActions(data, controller)`, and then wrap
    *that* in `scheduleBatch`. Executing the operation enables the action in `BeamState`; a cBEAM
    later routes it to the target via `Configurator.callControllerAction`.
+
+3. **Arbitrary BeamState batches.** `batchArbitraryCalls` takes a caller-supplied list of `payloads`
+   and wraps them directly in `scheduleBatch`, each targeting `BeamState`.
 
 ```
 generator.<fn>(...) ──▶ returns scheduleBatch(...) calldata
@@ -136,6 +139,12 @@ to the correct facet:
 > The controller-level selectors are copied verbatim from diamond-pau's `IMainnetControllerFull`.
 > Keep the `ControllerLike` interface in `TimelockCalldataGenerator.sol` in sync if a facet
 > signature changes.
+
+### Arbitrary batch
+
+| Function | Purpose |
+| --- | --- |
+| `batchArbitraryCalls` | Wrap an arbitrary list of `payloads` (each targeting `BeamState`) into one `scheduleBatch` |
 
 ## Development
 

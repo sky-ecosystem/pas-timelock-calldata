@@ -497,4 +497,23 @@ contract TimelockCalldataGenerator {
         bytes memory controllerData = abi.encodeCall(ControllerLike.usds_setVault, (vault));
         data = _encodeControllerAction(controllerData, controller, predecessor, salt, delay);
     }
+
+    // --- Arbitrary Actions ---
+
+    function batchArbitraryCalls(
+        bytes[] calldata payloads,
+        bytes32 predecessor,
+        bytes32 salt,
+        uint256 delay
+    ) external view returns (bytes memory data) {
+        uint256 len = payloads.length;
+
+        address[] memory targets = new address[](len);
+
+        for (uint256 i = 0; i < len; ++i) {
+            targets[i] = address(beamState);
+        }
+
+        data = abi.encodeCall(TimelockLike.scheduleBatch, (targets, new uint256[](len), payloads, predecessor, salt, delay));
+    }
 }
