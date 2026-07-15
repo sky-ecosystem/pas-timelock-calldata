@@ -68,6 +68,24 @@ TimelockCalldataGenerator generator = new TimelockCalldataGenerator(beamStateAdd
 
 The BeamState address is stored as an immutable and exposed via `beamState()`.
 
+## Generating calldata
+
+`script/Generate.s.sol` is a thin [Foundry](https://book.getfoundry.sh/) script that inherits the
+generator and wires its constructor to the `BEAM_STATE` environment variable. Any generator
+function can then be called with `--sig`, and forge prints the returned calldata:
+
+```bash
+export BEAM_STATE=<beamStateAddress>
+
+forge script script/Generate.s.sol \
+  --sig "setHop(address,uint256,bytes32,bytes32,uint256)" \
+  $RATE_LIMITS 14400 $(cast 2b 0) $(cast keccak "spark-hop-2026-07") 172800
+```
+
+The `--sig` argument is any function from the [reference](#function-reference) below. The calldata
+is printed under `== Return ==` as `data: bytes 0x…`. Pass array arguments as `"[0x..,0x..]"` and
+`RateLimitConfig` tuples as `"(key,rateLimits,maxAmount,slope)"`.
+
 ## Function reference
 
 ### BeamState configuration
