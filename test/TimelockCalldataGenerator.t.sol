@@ -63,11 +63,6 @@ import { IUSDSFacet }       from "diamond-pau/facets/usds/IUSDSFacet.sol";
 
 import { IMainnetControllerFull } from "diamond-pau-test/interfaces/IMainnetControllerFull.sol";
 
-
-interface ControllerLike {
-    function rateLimits() external view returns (address);
-}
-
 interface RateLimitsLike {
     function grantRole(bytes32 role, address account) external;
     function getRateLimitData(bytes32 key) external view returns (uint256, uint256, uint256, uint256);
@@ -149,7 +144,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         PASInit.init(pas, MIN_DELAY, coreCouncil, new address[](0), new address[](0));
         vm.stopPrank();
 
-        // Onboard diamond controller, rate limiters, and cBeam in BeamState via generator+timelock
+        // Onboard diamond controller, accessControls, rate limiters, and cBeam in BeamState via generator+timelock
         _execute(_scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"), MIN_DELAY)));
         _execute(_scheduleWithGeneratorData(generator.addController(address(accessControls), bytes32(0), keccak256("ac"), MIN_DELAY)));
         _execute(_scheduleWithGeneratorData(generator.addRateLimits(address(rateLimits), bytes32(0), keccak256("rl"), MIN_DELAY)));
@@ -419,13 +414,13 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
     function testSetHop() public {
         bytes32 salt = keccak256("hop");
-        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setHop.selector, address(rateLimits), 3600), PREDECESSOR, salt);
+        bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setHop.selector, address(rateLimits), 1800), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.setHop(address(rateLimits), 3600, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleWithGeneratorData(generator.setHop(address(rateLimits), 1800, PREDECESSOR, salt, MIN_DELAY));
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
-        assertEq(beamState.getHop(address(rateLimits)), 3600);
+        assertEq(beamState.getHop(address(rateLimits)), 1800);
     }
 
     function testSetMaxChange() public {
