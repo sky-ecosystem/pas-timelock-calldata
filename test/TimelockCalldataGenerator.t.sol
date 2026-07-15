@@ -118,7 +118,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         timelock     = Timelock(payable(pas.timelock));
         beacon       = new Beacon(address(this));
         factory      = new PAUFactory(address(beacon));
-        generator    = new TimelockCalldataGenerator(pas.timelock, pas.beamState);
+        generator    = new TimelockCalldataGenerator(pas.beamState);
 
         accessControls = IAccessControls(factory.deployAccessControls(address(this)));
         almProxy       = factory.deployALMProxy(address(this));
@@ -393,7 +393,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
     // ============================================================================
 
     function testConstructor() public {
-        TimelockCalldataGenerator newGen = new TimelockCalldataGenerator(address(timelock), address(beamState));
+        TimelockCalldataGenerator newGen = new TimelockCalldataGenerator(address(beamState));
 
         assertEq(address(newGen.beamState()), address(beamState), "BeamState set correctly");
     }
