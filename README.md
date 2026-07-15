@@ -63,13 +63,10 @@ Functions that stage a controller action additionally take the target address (`
 ## Deployment
 
 ```solidity
-TimelockCalldataGenerator generator = new TimelockCalldataGenerator(
-    timelockAddress,
-    beamStateAddress
-);
+TimelockCalldataGenerator generator = new TimelockCalldataGenerator(beamStateAddress);
 ```
 
-Both addresses are stored as immutables and exposed via `timelock()` and `beamState()`.
+The BeamState address is stored as an immutable and exposed via `beamState()`.
 
 ## Function reference
 
