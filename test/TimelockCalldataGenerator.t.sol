@@ -18,10 +18,7 @@ pragma solidity ^0.8.24;
 
 import "pas/dss-test/DssTest.sol";
 import { MCD, DssInstance } from "pas/dss-test/MCD.sol";
-import {
-    TimelockCalldataGenerator,
-    RateLimitConfig
-} from "src/TimelockCalldataGenerator.sol";
+import { TimelockCalldataGenerator } from "src/TimelockCalldataGenerator.sol";
 import { Timelock } from "pas/timelock/Timelock.sol";
 import { BeamState } from "pas/BeamState.sol";
 import { Configurator } from "pas/Configurator.sol";
@@ -145,10 +142,10 @@ contract TimelockCalldataGeneratorTest is DssTest {
         vm.stopPrank();
 
         // Onboard diamond controller, accessControls, rate limiters, and cBeam in BeamState via generator+timelock
-        _execute(_scheduleWithGeneratorData(generator.addController(address(controller), bytes32(0), keccak256("ctrl"), MIN_DELAY)));
-        _execute(_scheduleWithGeneratorData(generator.addController(address(accessControls), bytes32(0), keccak256("ac"), MIN_DELAY)));
-        _execute(_scheduleWithGeneratorData(generator.addRateLimits(address(rateLimits), bytes32(0), keccak256("rl"), MIN_DELAY)));
-        _execute(_scheduleWithGeneratorData(generator.addCBeam(cBeam, bytes32(0), keccak256("cbeam"), MIN_DELAY)));
+        _execute(_scheduleOne(generator.addController(address(controller)),     bytes32(0), keccak256("ctrl")));
+        _execute(_scheduleOne(generator.addController(address(accessControls)), bytes32(0), keccak256("ac")));
+        _execute(_scheduleOne(generator.addRateLimits(address(rateLimits)),     bytes32(0), keccak256("rl")));
+        _execute(_scheduleOne(generator.addCBeam(cBeam),                        bytes32(0), keccak256("cbeam")));
 
         // Verify generator-driven calls correctly configured BeamState
         assertEq(beamState.controllers(address(controller)),     1, "diamond controller not added");
@@ -164,7 +161,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         vm.stopPrank();
 
         // Set hop for rate limiters (required for setRateLimit to work on increases)
-        _execute(_scheduleWithGeneratorData(generator.setHop(address(rateLimits), 1 hours, bytes32(0), keccak256("rl-hop"), MIN_DELAY)));
+        _execute(_scheduleOne(generator.setHop(address(rateLimits), 1 hours), bytes32(0), keccak256("rl-hop")));
 
         // Mark the shared predecessor as executed so every test's operations (which declare it as
         // their predecessor) can be executed.
@@ -329,6 +326,13 @@ contract TimelockCalldataGeneratorTest is DssTest {
         id = timelock.getLastOperationId();
     }
 
+    // Wraps a single generator payload into a scheduleBatch operation and submits it.
+    function _scheduleOne(bytes memory payload, bytes32 predecessor, bytes32 salt) internal returns (bytes32 id) {
+        bytes[] memory payloads = new bytes[](1);
+        payloads[0] = payload;
+        id = _scheduleWithGeneratorData(generator.scheduleBatch(payloads, predecessor, salt, MIN_DELAY));
+    }
+
     function _execute(bytes32 id) internal {
         vm.warp(block.timestamp + MIN_DELAY);
         Timelock.Operation memory op = timelock.getOperation(id);
@@ -365,10 +369,10 @@ contract TimelockCalldataGeneratorTest is DssTest {
     // Schedules + executes a generator-built controller action and routes it through the
     // configurator to the target controller. Returns the extracted controller-action data
     // for assertions.
-    function _runControllerAction(bytes memory generatorOutput, bytes memory expectedControllerData, address target, bytes32 salt) internal returns (bytes memory data) {
+    function _runControllerAction(bytes memory payload, bytes memory expectedControllerData, address target, bytes32 salt) internal returns (bytes memory data) {
         bytes32 expectedId = _expectedControllerActionId(expectedControllerData, target, PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generatorOutput);
+        bytes32 id = _scheduleOne(payload, PREDECESSOR, salt);
         assertEq(id, expectedId, "operation id mismatch");
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
 
@@ -405,7 +409,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         bytes32 salt = keccak256("start");
         bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.start.selector), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.start(PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleOne(generator.start(), PREDECESSOR, salt);
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
@@ -416,7 +420,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         bytes32 salt = keccak256("hop");
         bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setHop.selector, address(rateLimits), 1800), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.setHop(address(rateLimits), 1800, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleOne(generator.setHop(address(rateLimits), 1800), PREDECESSOR, salt);
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
@@ -427,7 +431,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         bytes32 salt = keccak256("mc");
         bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.setMaxChange.selector, address(rateLimits), 2e18), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.setMaxChange(address(rateLimits), 2e18, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleOne(generator.setMaxChange(address(rateLimits), 2e18), PREDECESSOR, salt);
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
@@ -439,7 +443,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         bytes32 salt = keccak256("rl");
         bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addRateLimits.selector, rateLimits_), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.addRateLimits(rateLimits_, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleOne(generator.addRateLimits(rateLimits_), PREDECESSOR, salt);
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
@@ -451,7 +455,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         bytes32 salt = keccak256("ctrl");
         bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addController.selector, newController), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.addController(newController, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleOne(generator.addController(newController), PREDECESSOR, salt);
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
@@ -463,7 +467,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         bytes32 salt = keccak256("cbeam");
         bytes32 expectedId = _expectedOperationId(abi.encodeWithSelector(BeamState.addCBeam.selector, beam), PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.addCBeam(beam, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleOne(generator.addCBeam(beam), PREDECESSOR, salt);
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
@@ -471,87 +475,39 @@ contract TimelockCalldataGeneratorTest is DssTest {
     }
 
     function testAddInitRateLimits() public {
-        RateLimitConfig memory config = RateLimitConfig({
-            key: "deposit",
-            rateLimits: address(rateLimits),
-            maxAmount: 10_000_000e18,
-            slope: 1_000_000e18
-        });
+        bytes32 key = "deposit";
+        uint256 maxAmount = 10_000_000e18;
+        uint256 slope = 1_000_000e18;
 
         bytes32 salt = "init-rate-limits";
 
         bytes32 expectedId = _expectedOperationId(
-            abi.encodeWithSelector(BeamState.addInitRateLimits.selector, config.key, config.rateLimits, config.maxAmount, config.slope),
+            abi.encodeWithSelector(BeamState.addInitRateLimits.selector, key, address(rateLimits), maxAmount, slope),
             PREDECESSOR,
             salt
         );
 
-        bytes32 id = _scheduleWithGeneratorData(generator.addInitRateLimits(config, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleOne(generator.addInitRateLimits(key, address(rateLimits), maxAmount, slope), PREDECESSOR, salt);
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
         _execute(id);
 
         // Verify stored in BeamState
-        BeamState.DefaultRateLimits memory limits = beamState.getInitRateLimits(config.key, address(rateLimits));
-        assertEq(limits.maxAmount, config.maxAmount);
-        assertEq(limits.slope, config.slope);
+        BeamState.DefaultRateLimits memory limits = beamState.getInitRateLimits(key, address(rateLimits));
+        assertEq(limits.maxAmount, maxAmount);
+        assertEq(limits.slope, slope);
 
         // Execute on real rate limiter via Configurator
         vm.prank(cBeam);
-        configurator.setRateLimit(address(rateLimits), config.key, config.maxAmount, config.slope);
+        configurator.setRateLimit(address(rateLimits), key, maxAmount, slope);
 
         // Verify set on real rate limiter
-        (uint256 setMax, uint256 setSlope,,) = rateLimits.getRateLimitData(config.key);
-        assertEq(setMax, config.maxAmount);
-        assertEq(setSlope, config.slope);
+        (uint256 setMax, uint256 setSlope,,) = rateLimits.getRateLimitData(key);
+        assertEq(setMax, maxAmount);
+        assertEq(setSlope, slope);
     }
 
-    function testBatchAddInitRateLimits() public {
-        RateLimitConfig[] memory configs = new RateLimitConfig[](2);
-        configs[0] = RateLimitConfig("deposit", address(rateLimits), 5_000_000e18, 500_000e18);
-        configs[1] = RateLimitConfig("withdraw", address(rateLimits), 3_000_000e18, 300_000e18);
-
-        bytes32 salt = "batch-init-rate-limits";
-
-        // Pre-compute expected operationId for batch
-        address[] memory targets = new address[](2);
-        uint256[] memory values = new uint256[](2);
-        bytes[] memory payloads = new bytes[](2);
-        for (uint256 i = 0; i < 2; i++) {
-            targets[i] = address(beamState);
-            payloads[i] = abi.encodeWithSelector(BeamState.addInitRateLimits.selector, configs[i].key, configs[i].rateLimits, configs[i].maxAmount, configs[i].slope);
-        }
-        bytes32 expectedId = timelock.hashOperationBatch(targets, values, payloads, PREDECESSOR, salt);
-
-        bytes32 id = _scheduleWithGeneratorData(generator.batchAddInitRateLimits(configs, PREDECESSOR, salt, MIN_DELAY));
-        assertEq(id, expectedId);
-        assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
-        assertEq(timelock.getOperationsCount(), 1);
-
-        vm.warp(block.timestamp + MIN_DELAY);
-        timelock.executeBatch(targets, values, payloads, PREDECESSOR, salt);
-
-        // Verify stored in BeamState
-        assertEq(beamState.getInitRateLimits(configs[0].key, address(rateLimits)).maxAmount, configs[0].maxAmount);
-        assertEq(beamState.getInitRateLimits(configs[1].key, address(rateLimits)).maxAmount, configs[1].maxAmount);
-
-        // Execute on real rate limiter via Configurator
-        vm.startPrank(cBeam);
-        configurator.setRateLimit(address(rateLimits), configs[0].key, configs[0].maxAmount, configs[0].slope);
-        configurator.setRateLimit(address(rateLimits), configs[1].key, configs[1].maxAmount, configs[1].slope);
-        vm.stopPrank();
-
-        // Verify set on real rate limiter
-        (uint256 max0, uint256 slope0,,) = rateLimits.getRateLimitData(configs[0].key);
-        assertEq(max0, configs[0].maxAmount);
-        assertEq(slope0, configs[0].slope);
-
-        (uint256 max1, uint256 slope1,,) = rateLimits.getRateLimitData(configs[1].key);
-        assertEq(max1, configs[1].maxAmount);
-        assertEq(slope1, configs[1].slope);
-    }
-
-    function testBatchArbitraryCalls() public {
+    function testScheduleBatch() public {
         address newController = makeAddr("arbitraryController");
         address beam          = makeAddr("arbitraryCBeam");
 
@@ -560,28 +516,32 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address account = makeAddr("batchRoleAccount");
         bytes memory controllerAction = abi.encodeCall(IAccessControl.grantRole, (role, account));
 
-        // Heterogeneous batch: several different BeamState calls in one scheduled operation,
-        // including staging a controller action. batchArbitraryCalls targets BeamState for every payload.
-        bytes[] memory payloads = new bytes[](3);
-        payloads[0] = abi.encodeWithSelector(BeamState.addController.selector, newController);
-        payloads[1] = abi.encodeWithSelector(BeamState.addCBeam.selector, beam);
-        payloads[2] = abi.encodeWithSelector(BeamState.addInitControllerActions.selector, controllerAction, address(accessControls));
+        // Collect several encoder payloads — including staging a controller action — and batch them
+        // into one scheduled operation. scheduleBatch targets BeamState for every payload.
+        bytes[] memory payloads = new bytes[](5);
+        payloads[0] = generator.addController(newController);
+        payloads[1] = generator.addCBeam(beam);
+        payloads[2] = generator.grantRole(role, account, address(accessControls));
+        payloads[3] = generator.addInitRateLimits("deposit", address(rateLimits), 5_000_000e18, 500_000e18);
+        payloads[4] = generator.addInitRateLimits("withdraw", address(rateLimits), 3_000_000e18, 300_000e18);
 
-        address[] memory targets = new address[](3);
+        address[] memory targets = new address[](5);
         targets[0] = address(beamState);
         targets[1] = address(beamState);
         targets[2] = address(beamState);
+        targets[3] = address(beamState);
+        targets[4] = address(beamState);
 
-        bytes32 salt = "batch-arbitrary-calls";
+        bytes32 salt = "schedule-batch";
 
-        bytes32 expectedId = timelock.hashOperationBatch(targets, new uint256[](3), payloads, PREDECESSOR, salt);
+        bytes32 expectedId = timelock.hashOperationBatch(targets, new uint256[](5), payloads, PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.batchArbitraryCalls(payloads, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleWithGeneratorData(generator.scheduleBatch(payloads, PREDECESSOR, salt, MIN_DELAY));
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
 
         vm.warp(block.timestamp + MIN_DELAY);
-        timelock.executeBatch(targets, new uint256[](3), payloads, PREDECESSOR, salt);
+        timelock.executeBatch(targets, new uint256[](5), payloads, PREDECESSOR, salt);
 
         assertEq(beamState.controllers(newController), 1, "controller not added");
         assertEq(beamState.cBeams(beam),               1, "cBeam not added");
@@ -589,11 +549,28 @@ contract TimelockCalldataGeneratorTest is DssTest {
             beamState.isControllerActionEnabled(keccak256(controllerAction), address(accessControls)),
             "controller action not whitelisted"
         );
+        assertEq(beamState.getInitRateLimits("deposit", address(rateLimits)).maxAmount, 5_000_000e18);
+        assertEq(beamState.getInitRateLimits("withdraw", address(rateLimits)).maxAmount, 3_000_000e18);
 
         // The whitelisted action is now callable through the Configurator.
         vm.prank(cBeam);
         configurator.callControllerAction(address(accessControls), controllerAction);
         assertTrue(accessControls.hasRole(role, account), "role not granted via whitelisted action");
+
+        // Execute on rate limiter via Configurator
+        vm.startPrank(cBeam);
+        configurator.setRateLimit(address(rateLimits), "deposit", 5_000_000e18, 500_000e18);
+        configurator.setRateLimit(address(rateLimits), "withdraw", 3_000_000e18, 300_000e18);
+        vm.stopPrank();
+
+        // Verify set on rate limiter
+        (uint256 max0, uint256 slope0,,) = rateLimits.getRateLimitData("deposit");
+        assertEq(max0, 5_000_000e18);
+        assertEq(slope0, 500_000e18);
+
+        (uint256 max1, uint256 slope1,,) = rateLimits.getRateLimitData("withdraw");
+        assertEq(max1, 3_000_000e18);
+        assertEq(slope1, 300_000e18);
     }
 
     // ============================================================================
@@ -609,7 +586,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IAccessControl.grantRole, (role, account));
         _runControllerAction(
-            generator.grantRole(role, account, address(accessControls), PREDECESSOR, salt, MIN_DELAY),
+            generator.grantRole(role, account, address(accessControls)),
             expected,
             address(accessControls),
             salt
@@ -629,7 +606,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IAccessControl.revokeRole, (role, account));
         _runControllerAction(
-            generator.revokeRole(role, account, address(accessControls), PREDECESSOR, salt, MIN_DELAY),
+            generator.revokeRole(role, account, address(accessControls)),
             expected,
             address(accessControls),
             salt
@@ -647,7 +624,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IAccessControls.setRoleAdmin, (role, adminRole));
         _runControllerAction(
-            generator.setRoleAdmin(role, adminRole, address(accessControls), PREDECESSOR, salt, MIN_DELAY),
+            generator.setRoleAdmin(role, adminRole, address(accessControls)),
             expected,
             address(accessControls),
             salt
@@ -686,7 +663,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IController.updateIntegrations, (ids));
         _runControllerAction(
-            generator.updateIntegrations(ids, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.updateIntegrations(ids, address(controller)),
             expected,
             address(controller),
             salt
@@ -712,7 +689,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IController.removeIntegrations, (ids));
         _runControllerAction(
-            generator.removeIntegrations(ids, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.removeIntegrations(ids, address(controller)),
             expected,
             address(controller),
             salt
@@ -736,7 +713,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.aave_setMaxSlippage, (aToken, slippage));
         _runControllerAction(
-            generator.aave_setMaxSlippage(aToken, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.aave_setMaxSlippage(aToken, slippage, address(controller)),
             expected,
             address(controller),
             salt
@@ -759,7 +736,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
             (domain, recipient, minFeeCapRate, maxFeeCapRate)
         );
         _runControllerAction(
-            generator.cctp_setDomainParameters(domain, recipient, minFeeCapRate, maxFeeCapRate, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.cctp_setDomainParameters(domain, recipient, minFeeCapRate, maxFeeCapRate, address(controller)),
             expected,
             address(controller),
             salt
@@ -780,7 +757,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.centrifuge_setRecipient, (centrifugeId, recipient));
         _runControllerAction(
-            generator.centrifuge_setRecipient(centrifugeId, recipient, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.centrifuge_setRecipient(centrifugeId, recipient, address(controller)),
             expected,
             address(controller),
             salt
@@ -798,7 +775,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.curve_setMaxSlippage, (pool, slippage));
         _runControllerAction(
-            generator.curve_setMaxSlippage(pool, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.curve_setMaxSlippage(pool, slippage, address(controller)),
             expected,
             address(controller),
             salt
@@ -820,7 +797,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
             (token, shares, maxExpectedAssets)
         );
         _runControllerAction(
-            generator.erc4626_setMaxExchangeRate(token, shares, maxExpectedAssets, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.erc4626_setMaxExchangeRate(token, shares, maxExpectedAssets, address(controller)),
             expected,
             address(controller),
             salt
@@ -840,7 +817,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.layerZero_setRecipient, (endpointId, recipient));
         _runControllerAction(
-            generator.layerZero_setRecipient(endpointId, recipient, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.layerZero_setRecipient(endpointId, recipient, address(controller)),
             expected,
             address(controller),
             salt
@@ -861,7 +838,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
             (facility, maxAnnualGrowthRate)
         );
         _runControllerAction(
-            generator.nfatHalo_setMaxAnnualGrowthRate(facility, maxAnnualGrowthRate, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.nfatHalo_setMaxAnnualGrowthRate(facility, maxAnnualGrowthRate, address(controller)),
             expected,
             address(controller),
             salt
@@ -879,7 +856,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.otc_setMaxSlippage, (exchange, slippage));
         _runControllerAction(
-            generator.otc_setMaxSlippage(exchange, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.otc_setMaxSlippage(exchange, slippage, address(controller)),
             expected,
             address(controller),
             salt
@@ -895,7 +872,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.otc_setBuffer, (exchange, buffer));
         _runControllerAction(
-            generator.otc_setBuffer(exchange, buffer, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.otc_setBuffer(exchange, buffer, address(controller)),
             expected,
             address(controller),
             salt
@@ -911,7 +888,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.otc_setRechargeRate, (exchange, normalizedRate));
         _runControllerAction(
-            generator.otc_setRechargeRate(exchange, normalizedRate, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.otc_setRechargeRate(exchange, normalizedRate, address(controller)),
             expected,
             address(controller),
             salt
@@ -929,7 +906,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setMaxSlippage, (pool, slippage));
         _runControllerAction(
-            generator.uniswapV3_setMaxSlippage(pool, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.uniswapV3_setMaxSlippage(pool, slippage, address(controller)),
             expected,
             address(controller),
             salt
@@ -945,7 +922,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setMaxTickDelta, (pool, maxTickDelta));
         _runControllerAction(
-            generator.uniswapV3_setMaxTickDelta(pool, maxTickDelta, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.uniswapV3_setMaxTickDelta(pool, maxTickDelta, address(controller)),
             expected,
             address(controller),
             salt
@@ -961,7 +938,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setLiquidityLowerTickBound, (pool, lowerTickBound));
         _runControllerAction(
-            generator.uniswapV3_setLiquidityLowerTickBound(pool, lowerTickBound, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.uniswapV3_setLiquidityLowerTickBound(pool, lowerTickBound, address(controller)),
             expected,
             address(controller),
             salt
@@ -978,7 +955,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setLiquidityUpperTickBound, (pool, upperTickBound));
         _runControllerAction(
-            generator.uniswapV3_setLiquidityUpperTickBound(pool, upperTickBound, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.uniswapV3_setLiquidityUpperTickBound(pool, upperTickBound, address(controller)),
             expected,
             address(controller),
             salt
@@ -995,7 +972,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV3_setTWAPSecondsAgo, (pool, twapSecondsAgo));
         _runControllerAction(
-            generator.uniswapV3_setTWAPSecondsAgo(pool, twapSecondsAgo, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.uniswapV3_setTWAPSecondsAgo(pool, twapSecondsAgo, address(controller)),
             expected,
             address(controller),
             salt
@@ -1013,7 +990,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.uniswapV4_setMaxSlippage, (poolId, slippage));
         _runControllerAction(
-            generator.uniswapV4_setMaxSlippage(poolId, slippage, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.uniswapV4_setMaxSlippage(poolId, slippage, address(controller)),
             expected,
             address(controller),
             salt
@@ -1034,7 +1011,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
             (poolId, tickLowerMin, tickUpperMax, maxTickSpacing)
         );
         _runControllerAction(
-            generator.uniswapV4_setTickLimits(poolId, tickLowerMin, tickUpperMax, maxTickSpacing, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.uniswapV4_setTickLimits(poolId, tickLowerMin, tickUpperMax, maxTickSpacing, address(controller)),
             expected,
             address(controller),
             salt
@@ -1054,7 +1031,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes memory expected = abi.encodeCall(IMainnetControllerFull.usds_setVault, (vault));
         _runControllerAction(
-            generator.usds_setVault(vault, address(controller), PREDECESSOR, salt, MIN_DELAY),
+            generator.usds_setVault(vault, address(controller)),
             expected,
             address(controller),
             salt

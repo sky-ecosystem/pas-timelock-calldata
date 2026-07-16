@@ -1,10 +1,12 @@
 # PAS Timelock Calldata Generator
 
 `TimelockCalldataGenerator` is a stateless helper contract that builds the calldata needed to
-schedule PAS governance operations through the PAS `Timelock`. Every function is `view`: it returns
-the ABI-encoded `bytes` for a `Timelock.scheduleBatch(...)` call that a proposer then submits
-on-chain. The contract holds no funds, has no privileged roles, and never mutates state — it only
-assembles calldata.
+schedule PAS governance operations through the PAS `Timelock`. It works in two steps: the encoder
+functions (`setHop`, `addController`, `grantRole`, `aave_setMaxSlippage`, …) each return a single
+`BeamState` payload, and `scheduleBatch` collects those payloads into the ABI-encoded `bytes` for a
+`Timelock.scheduleBatch(...)` call that a proposer then submits on-chain. Every function is
+`view`/`pure`; the contract holds no funds, has no privileged roles, and never mutates state — it
+only assembles calldata.
 
 ## Why
 
@@ -16,51 +18,50 @@ centralizes the encoding so proposers get correct calldata from a single, well-t
 
 ## How it works
 
-The generator produces calldata for these shapes of operation:
+Each encoder returns a single `BeamState` payload; you collect the payloads you need and pass them
+to `scheduleBatch`, which wraps them all into the calldata for one `Timelock.scheduleBatch(...)`
+operation (every payload targets `BeamState`). The encoders come in two shapes:
 
-1. **Direct BeamState configuration.** Functions like `start`, `setHop`, and `addController` encode
-   a single payload that calls the corresponding `BeamState` function directly, then wrap it in
-   `scheduleBatch`.
+1. **Direct BeamState configuration.** Functions like `start`, `setHop`, and `addController` return
+   the calldata for the corresponding `BeamState` function directly.
 
 2. **Staged controller actions.** Functions that target a controller (or `AccessControls`) encode
-   the inner call, wrap it in `BeamState.addInitControllerActions(data, controller)`, and then wrap
-   *that* in `scheduleBatch`. Executing the operation enables the action in `BeamState`; a cBEAM
-   later routes it to the target via `Configurator.callControllerAction`.
-
-3. **Arbitrary BeamState batches.** `batchArbitraryCalls` takes a caller-supplied list of `payloads`
-   and wraps them directly in `scheduleBatch`, each targeting `BeamState`.
+   the inner call and wrap it in `BeamState.addInitControllerActions(data, controller)`. Executing
+   the operation enables the action in `BeamState`; a cBEAM later routes it to the target via
+   `Configurator.callControllerAction`.
 
 ```
-generator.<fn>(...) ──▶ returns scheduleBatch(...) calldata
-                              │
-   proposer submits ──────────┘
-                              │
-                              ▼
-                     Timelock.scheduleBatch        (waits `delay`)
-                              │
-                              ▼
-                     Timelock.executeBatch
-                              │
-                              ▼
-              ┌───────────────┴─────────────────┐
-              │                                 │
-              ▼                                 ▼
-   BeamState.<config fn>          BeamState.addInitControllerActions(data, target)
-   (start, addController, …)                    │
-                                                ▼  (later, by a cBEAM)
-                                   Configurator.callControllerAction(target, data)
-                                                │
-                                                ▼
-                                     Controller / AccessControls
+generator.<fn>(...) ─▶ payload ─┐
+generator.<fn>(...) ─▶ payload ─┼─▶ generator.scheduleBatch(payloads, …) ─▶ scheduleBatch(...) calldata
+generator.<fn>(...) ─▶ payload ─┘                                                     │
+                                                          proposer submits ───────────┘
+                                                                            │
+                                                                            ▼
+                                                   Timelock.scheduleBatch        (waits `delay`)
+                                                                            │
+                                                                            ▼
+                                                   Timelock.executeBatch
+                                                                            │
+                                                                            ▼
+                                    ┌───────────────────────────────────────┴───────────┐
+                                    │                                                    │
+                                    ▼                                                    ▼
+                         BeamState.<config fn>              BeamState.addInitControllerActions(data, target)
+                         (start, addController, …)                          │
+                                                                            ▼  (later, by a cBEAM)
+                                                         Configurator.callControllerAction(target, data)
+                                                                            │
+                                                                            ▼
+                                                              Controller / AccessControls
 ```
 
-Every function takes the standard Timelock scheduling parameters as trailing arguments:
+`scheduleBatch` takes the standard Timelock scheduling parameters after the payloads:
 
 - `predecessor` — operation that must be executed first (`bytes32(0)` for none)
 - `salt` — disambiguates otherwise-identical operations
 - `delay` — timelock delay (must be `>=` the Timelock minimum)
 
-Functions that stage a controller action additionally take the target address (`controller` or
+Encoders that stage a controller action additionally take the target address (`controller` or
 `accessControls`).
 
 ## Deployment
@@ -75,19 +76,27 @@ The BeamState address is stored as an immutable and exposed via `beamState()`.
 
 `script/Generate.s.sol` is a thin [Foundry](https://book.getfoundry.sh/) script that inherits the
 generator and wires its constructor to the `BEAM_STATE` environment variable. Any generator
-function can then be called with `--sig`, and forge prints the returned calldata:
+function can then be called with `--sig`, and forge prints the returned bytes under `== Return ==`
+as `data: bytes 0x…`.
+
+First, get the payload for each operation from an encoder:
 
 ```bash
 export BEAM_STATE=<beamStateAddress>
 
-forge script script/Generate.s.sol \
-  --sig "setHop(address,uint256,bytes32,bytes32,uint256)" \
-  $RATE_LIMITS 14400 $(cast 2b 0) $(cast keccak "spark-hop-2026-07") 172800
+forge script script/Generate.s.sol --sig "setHop(address,uint256)" $RATE_LIMITS 14400
 ```
 
-The `--sig` argument is any function from the [reference](#function-reference) below. The calldata
-is printed under `== Return ==` as `data: bytes 0x…`. Pass array arguments as `"[0x..,0x..]"` and
-`RateLimitConfig` tuples as `"(key,rateLimits,maxAmount,slope)"`.
+Then pass the collected payload(s) to `scheduleBatch` to produce the final `Timelock` calldata:
+
+```bash
+forge script script/Generate.s.sol \
+  --sig "scheduleBatch(bytes[],bytes32,bytes32,uint256)" \
+  "[<payload1>,<payload2>,...]" $(cast 2b 0) $(cast keccak "spark-hop-2026-07") 172800
+```
+
+The encoder `--sig` is any function from the [reference](#function-reference) below. Pass array
+arguments as `"[0x..,0x..]"` and `RateLimitConfig` tuples as `"(key,rateLimits,maxAmount,slope)"`.
 
 ## Function reference
 
@@ -102,7 +111,6 @@ is printed under `== Return ==` as `data: bytes 0x…`. Pass array arguments as 
 | `addController` | Register a controller |
 | `addCBeam` | Register a cBEAM |
 | `addInitRateLimits` | Stage default rate-limit config for one key (`RateLimitConfig`) |
-| `batchAddInitRateLimits` | Stage default rate-limit config for many keys in one batch |
 
 ### Roles management (through AccessControls)
 
@@ -140,11 +148,11 @@ to the correct facet:
 > Keep the `ControllerLike` interface in `TimelockCalldataGenerator.sol` in sync if a facet
 > signature changes.
 
-### Arbitrary batch
+### Batch scheduling
 
 | Function | Purpose |
 | --- | --- |
-| `batchArbitraryCalls` | Wrap an arbitrary list of `payloads` (each targeting `BeamState`) into one `scheduleBatch` |
+| `scheduleBatch` | Wrap the collected encoder `payloads` (each targeting `BeamState`) into the calldata for one `Timelock.scheduleBatch(...)` operation |
 
 ## Development
 
