@@ -55,8 +55,10 @@ generator.<fn>(...) ─▶ payload ─┘                                       
                                                               Controller / AccessControls
 ```
 
-`scheduleBatch` takes the standard Timelock scheduling parameters after the payloads:
+`scheduleBatch` takes the `BeamState` address that every payload targets, followed by the payloads
+and the standard Timelock scheduling parameters:
 
+- `beamState` — the `BeamState` address every payload targets
 - `predecessor` — operation that must be executed first (`bytes32(0)` for none)
 - `salt` — disambiguates otherwise-identical operations
 - `delay` — timelock delay (must be `>=` the Timelock minimum)
@@ -67,32 +69,29 @@ Encoders that stage a controller action additionally take the target address (`c
 ## Deployment
 
 ```solidity
-TimelockCalldataGenerator generator = new TimelockCalldataGenerator(beamStateAddress);
+TimelockCalldataGenerator generator = new TimelockCalldataGenerator();
 ```
 
-The BeamState address is stored as an immutable and exposed via `beamState()`.
+The contract is stateless; the target `BeamState` address is passed to `scheduleBatch` at call time.
 
 ## Generating calldata
 
 `script/Generate.s.sol` is a thin [Foundry](https://book.getfoundry.sh/) script that inherits the
-generator and wires its constructor to the `BEAM_STATE` environment variable. Any generator
-function can then be called with `--sig`, and forge prints the returned bytes under `== Return ==`
-as `data: bytes 0x…`.
+generator. Any generator function can be called with `--sig`, and forge prints the returned bytes
+under `== Return ==` as `data: bytes 0x…`.
 
 First, get the payload for each operation from an encoder:
 
 ```bash
-export BEAM_STATE=<beamStateAddress>
-
 forge script script/Generate.s.sol --sig "setHop(address,uint256)" $RATE_LIMITS 14400
 ```
 
-Then pass the collected payload(s) to `scheduleBatch` to produce the final `Timelock` calldata:
+Then pass the `BeamState` address, the collected payload(s), and the `Timelock` related parameters to `scheduleBatch` to produce the final calldata:
 
 ```bash
 forge script script/Generate.s.sol \
-  --sig "scheduleBatch(bytes[],bytes32,bytes32,uint256)" \
-  "[<payload1>,<payload2>,...]" $(cast 2b 0) $(cast keccak "spark-hop-2026-07") 172800
+  --sig "scheduleBatch(address,bytes[],bytes32,bytes32,uint256)" \
+  $BEAM_STATE "[<payload1>,<payload2>,...]" $(cast 2b 0) $(cast keccak "spark-hop-2026-07") 172800
 ```
 
 The encoder `--sig` is any function from the [reference](#function-reference) below. Pass array

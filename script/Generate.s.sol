@@ -20,6 +20,4 @@ import { Script } from "forge-std/Script.sol";
 
 import { TimelockCalldataGenerator } from "../src/TimelockCalldataGenerator.sol";
 
-contract Generate is TimelockCalldataGenerator, Script {
-    constructor() TimelockCalldataGenerator(vm.envAddress("BEAM_STATE")) {}
-}
+contract Generate is TimelockCalldataGenerator, Script {}

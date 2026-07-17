@@ -85,12 +85,6 @@ interface ControllerLike {
 /// The contract holds no funds, has no privileged roles, and never mutates state.
 contract TimelockCalldataGenerator {
 
-    BeamStateLike public immutable beamState;
-
-    constructor(address beamState_) {
-        beamState = BeamStateLike(beamState_);
-    }
-
     function _controllerActionPayload(bytes memory controllerData, address controller) internal pure returns (bytes memory payload) {
         payload = abi.encodeCall(BeamStateLike.addInitControllerActions, (controllerData, controller));
     }
@@ -98,18 +92,19 @@ contract TimelockCalldataGenerator {
     // --- Batch scheduling ---
 
     /// @notice Wrap `BeamState` payloads (as produced by the encoders below) into the calldata for
-    ///         a single `Timelock.scheduleBatch(...)` operation. Every payload targets `BeamState`.
+    ///         a single `Timelock.scheduleBatch(...)` operation. Every payload targets `beamState`.
     function scheduleBatch(
+        address beamState,
         bytes[] calldata payloads,
         bytes32 predecessor,
         bytes32 salt,
         uint256 delay
-    ) external view returns (bytes memory data) {
+    ) external pure returns (bytes memory data) {
         uint256 len = payloads.length;
 
         address[] memory targets = new address[](len);
         for (uint256 i = 0; i < len; ++i) {
-            targets[i] = address(beamState);
+            targets[i] = beamState;
         }
 
         data = abi.encodeCall(TimelockLike.scheduleBatch, (targets, new uint256[](len), payloads, predecessor, salt, delay));

@@ -110,7 +110,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         timelock     = Timelock(payable(pas.timelock));
         beacon       = new Beacon(address(this));
         factory      = new PAUFactory(address(beacon));
-        generator    = new TimelockCalldataGenerator(pas.beamState);
+        generator    = new TimelockCalldataGenerator();
 
         accessControls = IAccessControls(factory.deployAccessControls(address(this)));
         almProxy       = factory.deployALMProxy(address(this));
@@ -330,7 +330,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
     function _scheduleOne(bytes memory payload, bytes32 predecessor, bytes32 salt) internal returns (bytes32 id) {
         bytes[] memory payloads = new bytes[](1);
         payloads[0] = payload;
-        id = _scheduleWithGeneratorData(generator.scheduleBatch(payloads, predecessor, salt, MIN_DELAY));
+        id = _scheduleWithGeneratorData(generator.scheduleBatch(address(beamState), payloads, predecessor, salt, MIN_DELAY));
     }
 
     function _execute(bytes32 id) internal {
@@ -385,16 +385,6 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         vm.prank(cBeam);
         configurator.callControllerAction(target, data);
-    }
-
-    // ============================================================================
-    // Constructor Test
-    // ============================================================================
-
-    function testConstructor() public {
-        TimelockCalldataGenerator newGen = new TimelockCalldataGenerator(address(beamState));
-
-        assertEq(address(newGen.beamState()), address(beamState), "BeamState set correctly");
     }
 
     // ============================================================================
@@ -536,7 +526,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
 
         bytes32 expectedId = timelock.hashOperationBatch(targets, new uint256[](5), payloads, PREDECESSOR, salt);
 
-        bytes32 id = _scheduleWithGeneratorData(generator.scheduleBatch(payloads, PREDECESSOR, salt, MIN_DELAY));
+        bytes32 id = _scheduleWithGeneratorData(generator.scheduleBatch(address(beamState), payloads, PREDECESSOR, salt, MIN_DELAY));
         assertEq(id, expectedId);
         assertEq(timelock.getTimestamp(id), block.timestamp + MIN_DELAY);
 
