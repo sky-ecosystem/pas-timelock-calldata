@@ -91,6 +91,10 @@ contract TimelockCalldataGenerator {
         beamState = BeamStateLike(beamState_);
     }
 
+    function _controllerActionPayload(bytes memory controllerData, address controller) internal pure returns (bytes memory payload) {
+        payload = abi.encodeCall(BeamStateLike.addInitControllerActions, (controllerData, controller));
+    }
+
     // --- Batch scheduling ---
 
     /// @notice Wrap `BeamState` payloads (as produced by the encoders below) into the calldata for
@@ -142,10 +146,6 @@ contract TimelockCalldataGenerator {
     }
 
     // --- Roles Management Actions (through AccessControls) ---
-
-    function _controllerActionPayload(bytes memory controllerData, address controller) internal pure returns (bytes memory payload) {
-        payload = abi.encodeCall(BeamStateLike.addInitControllerActions, (controllerData, controller));
-    }
 
     function grantRole(bytes32 role, address account, address accessControls) external pure returns (bytes memory payload) {
         payload = _controllerActionPayload(abi.encodeCall(AccessControlsLike.grantRole, (role, account)), accessControls);
