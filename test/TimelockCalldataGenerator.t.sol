@@ -66,14 +66,9 @@ interface RateLimitsLike {
 }
 
 contract TimelockCalldataGeneratorTest is DssTest {
-    address constant CHAINLOG = 0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F;
-
     bytes32 constant PREDECESSOR = keccak256("PREDECESSOR");
     uint256 constant MIN_DELAY = 1 days;
-
     bytes32 constant OZ_DEFAULT_ADMIN_ROLE = bytes32(0);
-
-    DssInstance dss;
 
     // --- PAS Instance ---
     BeamState                 beamState;
@@ -94,13 +89,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
     address cBeam;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("ETH_RPC_URL"));
-
-        // Load DssInstance from chainlog
-        dss = MCD.loadFromChainlog(CHAINLOG);
-
-        pauseProxy = dss.chainlog.getAddress("MCD_PAUSE_PROXY");
-
+        pauseProxy  = makeAddr("pauseProxy");
         coreCouncil = makeAddr("coreCouncil");
         cBeam       = makeAddr("cBeam");
 

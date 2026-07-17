@@ -111,13 +111,3 @@ Built with [Foundry](https://book.getfoundry.sh/).
 forge build          # compile
 forge test           # run the test suite
 ```
-
-The test suite (`test/TimelockCalldataGenerator.t.sol`) is a **fork test**: it deploys a full PAS +
-diamond-pau stack against a mainnet fork and exercises every generator function end-to-end through
-the real `Timelock`, `BeamState`, `Configurator`, and controller facets. It requires a mainnet RPC
-endpoint:
-
-```bash
-export ETH_RPC_URL=<mainnet-rpc-url>
-forge test
-```
