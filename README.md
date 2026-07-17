@@ -96,57 +96,7 @@ forge script script/Generate.s.sol \
 ```
 
 The encoder `--sig` is any function from the [reference](#function-reference) below. Pass array
-arguments as `"[0x..,0x..]"` and `RateLimitConfig` tuples as `"(key,rateLimits,maxAmount,slope)"`.
-
-## Function reference
-
-### BeamState configuration
-
-| Function | Purpose |
-| --- | --- |
-| `start` | Un-stop `BeamState` |
-| `setHop` | Set the rate-limit `hop` for a rate limiter |
-| `setMaxChange` | Set the max relative change for a rate limiter |
-| `addRateLimits` | Register a rate limiter |
-| `addController` | Register a controller |
-| `addCBeam` | Register a cBEAM |
-| `addInitRateLimits` | Stage default rate-limit config for one key (`RateLimitConfig`) |
-
-### Roles management (through AccessControls)
-
-| Function | Purpose |
-| --- | --- |
-| `grantRole` | Grant a role on an `AccessControls` contract |
-| `revokeRole` | Revoke a role |
-| `setRoleAdmin` | Set the admin role for a role |
-
-### Controller integrations (native controller functions)
-
-| Function | Purpose |
-| --- | --- |
-| `updateIntegrations` | Add/overwrite diamond-pau integrations by id |
-| `removeIntegrations` | Remove diamond-pau integrations by id |
-
-### Controller facet actions (diamond-pau)
-
-Encoded with the controller-level selectors (e.g. `aave_setMaxSlippage`) that the diamond dispatches
-to the correct facet:
-
-- **Aave** — `aave_setMaxSlippage`
-- **CCTP** — `cctp_setDomainParameters`
-- **Centrifuge** — `centrifuge_setRecipient`
-- **Curve** — `curve_setMaxSlippage`
-- **ERC4626** — `erc4626_setMaxExchangeRate`
-- **LayerZero** — `layerZero_setRecipient`
-- **NFATHalo** — `nfatHalo_setMaxAnnualGrowthRate`
-- **OTC** — `otc_setMaxSlippage`, `otc_setBuffer`, `otc_setRechargeRate`
-- **UniswapV3** — `uniswapV3_setMaxSlippage`, `uniswapV3_setMaxTickDelta`, `uniswapV3_setLiquidityLowerTickBound`, `uniswapV3_setLiquidityUpperTickBound`, `uniswapV3_setTWAPSecondsAgo`
-- **UniswapV4** — `uniswapV4_setMaxSlippage`, `uniswapV4_setTickLimits`
-- **USDS** — `usds_setVault`
-
-> The controller-level selectors are copied verbatim from diamond-pau's `IMainnetControllerFull`.
-> Keep the `ControllerLike` interface in `TimelockCalldataGenerator.sol` in sync if a facet
-> signature changes.
+arguments as `"[0x..,0x..]"`.
 
 ### Batch scheduling
 
