@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.34;
 
 import "pas/dss-test/DssTest.sol";
 import { MCD, DssInstance } from "pas/dss-test/MCD.sol";
