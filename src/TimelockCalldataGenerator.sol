@@ -49,7 +49,8 @@ interface AccessControlsLike {
 // bare `setMaxSlippage` that several facets share), so the generator emits calldata
 // starting with those selectors and the diamond's fallback dispatches it to the right
 // facet. These signatures are copied verbatim (only the ones this generator uses) from
-// diamond-pau's `IMainnetControllerFull`; keep them in sync if a facet signature changes.
+// diamond-pau's `IMainnetControllerFull` (and IController for updateIntegrations/removeIntegrations);
+// keep them in sync if a facet signature changes.
 interface ControllerLike {
     function updateIntegrations(bytes32[] calldata ids) external;
     function removeIntegrations(bytes32[] calldata ids) external;
