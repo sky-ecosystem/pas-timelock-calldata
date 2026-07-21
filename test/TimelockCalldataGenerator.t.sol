@@ -46,18 +46,6 @@ import { UniswapV3Facet }  from "diamond-pau/facets/uniswap-v3/UniswapV3Facet.so
 import { UniswapV4Facet }  from "diamond-pau/facets/uniswap-v4/UniswapV4Facet.sol";
 import { USDSFacet }       from "diamond-pau/facets/usds/USDSFacet.sol";
 
-import { IAaveFacet }       from "diamond-pau/facets/aave/IAaveFacet.sol";
-import { ICCTPFacet }       from "diamond-pau/facets/cctp/ICCTPFacet.sol";
-import { ICentrifugeFacet } from "diamond-pau/facets/centrifuge/ICentrifugeFacet.sol";
-import { ICurveFacet }      from "diamond-pau/facets/curve/ICurveFacet.sol";
-import { IERC4626Facet }    from "diamond-pau/facets/erc4626/IERC4626Facet.sol";
-import { ILayerZeroFacet }  from "diamond-pau/facets/layer-zero/ILayerZeroFacet.sol";
-import { INFATHaloFacet }   from "diamond-pau/facets/nfat-halo/INFATHaloFacet.sol";
-import { IOTCFacet }        from "diamond-pau/facets/otc/IOTCFacet.sol";
-import { IUniswapV3Facet }  from "diamond-pau/facets/uniswap-v3/IUniswapV3Facet.sol";
-import { IUniswapV4Facet }  from "diamond-pau/facets/uniswap-v4/IUniswapV4Facet.sol";
-import { IUSDSFacet }       from "diamond-pau/facets/usds/IUSDSFacet.sol";
-
 import { IMainnetControllerFull } from "diamond-pau-test/interfaces/IMainnetControllerFull.sol";
 
 interface RateLimitsLike {
@@ -167,8 +155,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new AaveFacet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.aave_setMaxSlippage.selector, IAaveFacet.setMaxSlippage.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.aave_getMaxSlippage.selector, IAaveFacet.getMaxSlippage.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.aave_setMaxSlippage.selector, AaveFacet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.aave_getMaxSlippage.selector, AaveFacet.getMaxSlippage.selector);
 
         id = "AAVE_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -178,8 +166,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new CCTPFacet(makeAddr("CCTP_TOKEN_MESSENGER"), makeAddr("USDC")));
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.cctp_setDomainParameters.selector, ICCTPFacet.setDomainParameters.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.cctp_getDomainParameters.selector, ICCTPFacet.getDomainParameters.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.cctp_setDomainParameters.selector, CCTPFacet.setDomainParameters.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.cctp_getDomainParameters.selector, CCTPFacet.getDomainParameters.selector);
 
         id = "CCTP_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -189,8 +177,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new CentrifugeFacet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.centrifuge_setRecipient.selector, ICentrifugeFacet.setRecipient.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.centrifuge_getRecipient.selector, ICentrifugeFacet.getRecipient.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.centrifuge_setRecipient.selector, CentrifugeFacet.setRecipient.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.centrifuge_getRecipient.selector, CentrifugeFacet.getRecipient.selector);
 
         id = "CENTRIFUGE_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -200,8 +188,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new CurveFacet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.curve_setMaxSlippage.selector, ICurveFacet.setMaxSlippage.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.curve_getMaxSlippage.selector, ICurveFacet.getMaxSlippage.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.curve_setMaxSlippage.selector, CurveFacet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.curve_getMaxSlippage.selector, CurveFacet.getMaxSlippage.selector);
 
         id = "CURVE_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -211,8 +199,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new ERC4626Facet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.erc4626_setMaxExchangeRate.selector, IERC4626Facet.setMaxExchangeRate.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.erc4626_getMaxExchangeRate.selector, IERC4626Facet.getMaxExchangeRate.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.erc4626_setMaxExchangeRate.selector, ERC4626Facet.setMaxExchangeRate.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.erc4626_getMaxExchangeRate.selector, ERC4626Facet.getMaxExchangeRate.selector);
 
         id = "ERC4626_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -222,8 +210,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new LayerZeroFacet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.layerZero_setRecipient.selector, ILayerZeroFacet.setRecipient.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.layerZero_getRecipient.selector, ILayerZeroFacet.getRecipient.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.layerZero_setRecipient.selector, LayerZeroFacet.setRecipient.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.layerZero_getRecipient.selector, LayerZeroFacet.getRecipient.selector);
 
         id = "LAYER_ZERO_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -233,8 +221,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new NFATHaloFacet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.nfatHalo_setMaxAnnualGrowthRate.selector, INFATHaloFacet.setMaxAnnualGrowthRate.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.nfatHalo_getMaxAnnualGrowthRate.selector, INFATHaloFacet.getMaxAnnualGrowthRate.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.nfatHalo_setMaxAnnualGrowthRate.selector, NFATHaloFacet.setMaxAnnualGrowthRate.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.nfatHalo_getMaxAnnualGrowthRate.selector, NFATHaloFacet.getMaxAnnualGrowthRate.selector);
 
         id = "NFAT_HALO_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -244,12 +232,12 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new OTCFacet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](6);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setMaxSlippage.selector,  IOTCFacet.setMaxSlippage.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setBuffer.selector,       IOTCFacet.setBuffer.selector);
-        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setRechargeRate.selector, IOTCFacet.setRechargeRate.selector);
-        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getMaxSlippage.selector,  IOTCFacet.getMaxSlippage.selector);
-        wires[4] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getBuffer.selector,       IOTCFacet.getBuffer.selector);
-        wires[5] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getRechargeRate.selector, IOTCFacet.getRechargeRate.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setMaxSlippage.selector,  OTCFacet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setBuffer.selector,       OTCFacet.setBuffer.selector);
+        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_setRechargeRate.selector, OTCFacet.setRechargeRate.selector);
+        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getMaxSlippage.selector,  OTCFacet.getMaxSlippage.selector);
+        wires[4] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getBuffer.selector,       OTCFacet.getBuffer.selector);
+        wires[5] = IEnumerableIntegrations.Wire(IMainnetControllerFull.otc_getRechargeRate.selector, OTCFacet.getRechargeRate.selector);
 
         id = "OTC_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -259,15 +247,15 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new UniswapV3Facet(makeAddr("UNISWAP_V3_POSITION_MGR"), makeAddr("UNISWAP_V3_ROUTER")));
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](9);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setMaxSlippage.selector,             IUniswapV3Facet.setMaxSlippage.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setMaxTickDelta.selector,            IUniswapV3Facet.setMaxTickDelta.selector);
-        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setLiquidityLowerTickBound.selector, IUniswapV3Facet.setLiquidityLowerTickBound.selector);
-        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setLiquidityUpperTickBound.selector, IUniswapV3Facet.setLiquidityUpperTickBound.selector);
-        wires[4] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setTWAPSecondsAgo.selector,          IUniswapV3Facet.setTWAPSecondsAgo.selector);
-        wires[5] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getMaxSlippage.selector,             IUniswapV3Facet.getMaxSlippage.selector);
-        wires[6] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getMaxTickDelta.selector,            IUniswapV3Facet.getMaxTickDelta.selector);
-        wires[7] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getLiquidityTickBounds.selector,     IUniswapV3Facet.getLiquidityTickBounds.selector);
-        wires[8] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getTWAPSecondsAgo.selector,          IUniswapV3Facet.getTWAPSecondsAgo.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setMaxSlippage.selector,             UniswapV3Facet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setMaxTickDelta.selector,            UniswapV3Facet.setMaxTickDelta.selector);
+        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setLiquidityLowerTickBound.selector, UniswapV3Facet.setLiquidityLowerTickBound.selector);
+        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setLiquidityUpperTickBound.selector, UniswapV3Facet.setLiquidityUpperTickBound.selector);
+        wires[4] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_setTWAPSecondsAgo.selector,          UniswapV3Facet.setTWAPSecondsAgo.selector);
+        wires[5] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getMaxSlippage.selector,             UniswapV3Facet.getMaxSlippage.selector);
+        wires[6] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getMaxTickDelta.selector,            UniswapV3Facet.getMaxTickDelta.selector);
+        wires[7] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getLiquidityTickBounds.selector,     UniswapV3Facet.getLiquidityTickBounds.selector);
+        wires[8] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV3_getTWAPSecondsAgo.selector,          UniswapV3Facet.getTWAPSecondsAgo.selector);
 
         id = "UNISWAP_V3_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -277,10 +265,10 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new UniswapV4Facet(makeAddr("PERMIT2"), makeAddr("UNISWAP_V4_POSITION_MGR"), makeAddr("UNISWAP_V4_ROUTER")));
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](4);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_setMaxSlippage.selector, IUniswapV4Facet.setMaxSlippage.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_setTickLimits.selector,  IUniswapV4Facet.setTickLimits.selector);
-        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_getMaxSlippage.selector,   IUniswapV4Facet.getMaxSlippage.selector);
-        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_getTickLimits.selector,     IUniswapV4Facet.getTickLimits.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_setMaxSlippage.selector, UniswapV4Facet.setMaxSlippage.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_setTickLimits.selector,  UniswapV4Facet.setTickLimits.selector);
+        wires[2] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_getMaxSlippage.selector, UniswapV4Facet.getMaxSlippage.selector);
+        wires[3] = IEnumerableIntegrations.Wire(IMainnetControllerFull.uniswapV4_getTickLimits.selector,  UniswapV4Facet.getTickLimits.selector);
 
         id = "UNISWAP_V4_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -290,8 +278,8 @@ contract TimelockCalldataGeneratorTest is DssTest {
         address facet = address(new USDSFacet(makeAddr("USDS")));
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](2);
-        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.usds_setVault.selector, IUSDSFacet.setVault.selector);
-        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.usds_vault.selector,    IUSDSFacet.vault.selector);
+        wires[0] = IEnumerableIntegrations.Wire(IMainnetControllerFull.usds_setVault.selector, USDSFacet.setVault.selector);
+        wires[1] = IEnumerableIntegrations.Wire(IMainnetControllerFull.usds_vault.selector,    USDSFacet.vault.selector);
 
         id = "USDS_FACET";
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
@@ -622,7 +610,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
         facet = address(new AaveFacet());
 
         IEnumerableIntegrations.Wire[] memory wires = new IEnumerableIntegrations.Wire[](1);
-        wires[0] = IEnumerableIntegrations.Wire(callSelector, IAaveFacet.getMaxSlippage.selector);
+        wires[0] = IEnumerableIntegrations.Wire(callSelector, AaveFacet.getMaxSlippage.selector);
 
         beacon.setIntegration(id, IEnumerableIntegrations.Config({ facet: facet, wires: wires }));
     }
