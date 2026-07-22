@@ -9,7 +9,8 @@ ignored_warnings_from = ["lib/diamond-pau/lib/openzeppelin-contracts/", "lib/for
 
 remappings = [
   "@openzeppelin/contracts/=lib/diamond-pau/lib/openzeppelin-contracts/contracts/",
-  "pas/dss-test/=lib/pas/lib/dss-test/src/",
+  "dss-test/=lib/pas/lib/dss-test/src/",
+  "pas-deploy/=lib/pas/deploy/",
   "pas/=lib/pas/src/",
   "diamond-pau-test/=lib/diamond-pau/test/",
 ]

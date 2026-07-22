@@ -16,15 +16,15 @@
 
 pragma solidity ^0.8.34;
 
-import "pas/dss-test/DssTest.sol";
+import "dss-test/DssTest.sol";
 import { TimelockCalldataGenerator } from "src/TimelockCalldataGenerator.sol";
 import { Timelock } from "pas/timelock/Timelock.sol";
 import { BeamState } from "pas/BeamState.sol";
 import { Configurator } from "pas/Configurator.sol";
-import { PASDeploy } from "pas/deploy/PASDeploy.sol";
-import { PASInit } from "pas/deploy/PASInit.sol";
-import { PASAuthorizeInPAU } from "pas/deploy/PASAuthorizeInPAU.sol";
-import { PASInstance } from "pas/deploy/PASInstance.sol";
+import { PASDeploy } from "pas-deploy/PASDeploy.sol";
+import { PASInit } from "pas-deploy/PASInit.sol";
+import { PASAuthorizeInPAU } from "pas-deploy/PASAuthorizeInPAU.sol";
+import { PASInstance } from "pas-deploy/PASInstance.sol";
 
 import { Beacon }     from "diamond-pau/Beacon.sol";
 import { PAUFactory } from "diamond-pau/PAUFactory.sol";
