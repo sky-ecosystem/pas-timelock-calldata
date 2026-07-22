@@ -17,13 +17,13 @@
 pragma solidity ^0.8.34;
 
 import "pas/dss-test/DssTest.sol";
-import { MCD, DssInstance } from "pas/dss-test/MCD.sol";
 import { TimelockCalldataGenerator } from "src/TimelockCalldataGenerator.sol";
 import { Timelock } from "pas/timelock/Timelock.sol";
 import { BeamState } from "pas/BeamState.sol";
 import { Configurator } from "pas/Configurator.sol";
 import { PASDeploy } from "pas/deploy/PASDeploy.sol";
 import { PASInit } from "pas/deploy/PASInit.sol";
+import { PASAuthorizeInPAU } from "pas/deploy/PASAuthorizeInPAU.sol";
 import { PASInstance } from "pas/deploy/PASInstance.sol";
 
 import { Beacon }     from "diamond-pau/Beacon.sol";
@@ -96,8 +96,7 @@ contract TimelockCalldataGeneratorTest is DssTest {
             factory.deployController(address(accessControls), almProxy, address(rateLimits))
         ));
 
-        accessControls.grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
-        rateLimits.grantRole(OZ_DEFAULT_ADMIN_ROLE, address(configurator));
+        PASAuthorizeInPAU.authorize(address(configurator), address(accessControls), address(rateLimits));
 
         // Wire the subset of facets the generator targets.
         bytes32[] memory ids = new bytes32[](11);
