@@ -111,3 +111,19 @@ Built with [Foundry](https://book.getfoundry.sh/).
 forge build          # compile
 forge test           # run the test suite
 ```
+
+## Audits
+
+Audit reports are hosted on the auditors' public portfolio pages:
+
+| Auditor | Report | Date |
+| --- | --- | --- |
+| ChainSecurity | [Sky PAS Timelock Calldata Generator](https://www.chainsecurity.com/security-audit/pas-timelock-calldata-generator/) | 2026-08-05 |
+
+ChainSecurity reports are cumulative: each portfolio page hosts the latest version of the report, which covers all previously reviewed versions.
+
+### Other reports
+
+The following reports are not available on an auditor portfolio page and are kept in this repository:
+
+- [Cantina (20260903-cantina-report-sky-pas-timelock-calldata.pdf)](./audit/20260903-cantina-report-sky-pas-timelock-calldata.pdf)
